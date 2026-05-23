@@ -1,5 +1,5 @@
 {
-  "name": "print2cal-backend",
+  "name": "puricale-backend",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
