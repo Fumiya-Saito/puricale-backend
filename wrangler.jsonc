@@ -3,7 +3,10 @@
   "name": "print2cal-backend",
   "main": "src/index.ts",
   "compatibility_date": "2026-02-03",
-  "compatibility_flags": [ "nodejs_compat" ]
+  "compatibility_flags": [ "nodejs_compat" ],
+  "triggers": {
+    "crons": [ "0 3 * * *" ]
+  }
   // "compatibility_flags": [
   //   "nodejs_compat"
   // ],

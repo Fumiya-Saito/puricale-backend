@@ -440,3 +440,107 @@ export function createHelpBubble(settingsUrl: string): any {
     }
   }
 }
+
+// 7. 【新設】過去の記録発見通知バブル
+export function createPastRecordBubble(eventName: string, printId: string): FlexBubble {
+  return {
+    type: 'bubble',
+    size: 'kilo',
+    header: {
+      type: 'box',
+      layout: 'vertical',
+      contents: [
+        { type: 'text', text: '💡 去年の記録を発見！', weight: 'bold', color: '#ffffff', size: 'md' }
+      ],
+      backgroundColor: '#f39c12',
+      paddingAll: 'md'
+    },
+    body: {
+      type: 'box',
+      layout: 'vertical',
+      contents: [
+        {
+          type: 'text',
+          text: `去年の【${safeStr(eventName, 15)}】の記録（持ち物リストなど）が見つかりました！`,
+          wrap: true,
+          size: 'sm',
+          color: '#333333'
+        }
+      ]
+    },
+    footer: {
+      type: 'box',
+      layout: 'vertical',
+      contents: [
+        {
+          type: 'button',
+          style: 'primary',
+          height: 'sm',
+          color: '#f39c12',
+          action: {
+            type: 'postback',
+            label: '記録を見る',
+            data: `action=restore_past&printId=${printId}`,
+            displayText: '去年の記録を確認します'
+          }
+        }
+      ]
+    }
+  }
+}
+
+// 8. 【新設】復元された過去プリント表示用バブル
+export function createRestoredPrintBubble(eventName: string, text: string, imageUrl: string | null): FlexBubble {
+  const contents: FlexComponent[] = [
+    {
+      type: 'text',
+      text: '▼ 読み取られていたテキスト',
+      weight: 'bold',
+      size: 'xs',
+      color: '#aaaaaa',
+      margin: 'md'
+    },
+    {
+      type: 'text',
+      text: safeStr(text, 500) || 'テキストデータなし',
+      wrap: true,
+      size: 'sm',
+      color: '#333333',
+      margin: 'sm'
+    }
+  ]
+
+  if (imageUrl) {
+    contents.unshift({
+      type: 'image',
+      url: imageUrl,
+      size: 'full',
+      aspectRatio: '3:4',
+      aspectMode: 'cover',
+      action: {
+        type: 'uri',
+        label: '画像を拡大',
+        uri: imageUrl
+      }
+    })
+  }
+
+  return {
+    type: 'bubble',
+    size: 'giga',
+    header: {
+      type: 'box',
+      layout: 'vertical',
+      contents: [
+        { type: 'text', text: `🔙 復元: 去年の【${safeStr(eventName, 15)}】`, weight: 'bold', color: '#ffffff', size: 'sm' }
+      ],
+      backgroundColor: '#8e44ad',
+      paddingAll: 'md'
+    },
+    body: {
+      type: 'box',
+      layout: 'vertical',
+      contents: contents
+    }
+  }
+}

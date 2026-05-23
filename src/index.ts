@@ -6,7 +6,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 import { messagingApi, WebhookEvent } from '@line/bot-sdk'
 import { z } from 'zod'
 import { sign, verify } from 'hono/jwt'
-import { generateFlexMessages, createConfirmBubble, createSettingsBubble, createHelpBubble } from './flexMessages'
+import { generateFlexMessages, createConfirmBubble, createSettingsBubble, createHelpBubble, createPastRecordBubble, createRestoredPrintBubble } from './flexMessages'
 
 type Bindings = {
   GOOGLE_CLIENT_ID: string
@@ -956,10 +956,51 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                continue
              }
 
-             const replyMessages = generateFlexMessages(registeredEvents, ignoredEvents, targetMsgId)
+             const replyMessages: any[] = generateFlexMessages(registeredEvents, ignoredEvents, targetMsgId)
+
+             // ★ 過去データの検索 (Event-Trigger Notification)
+             try {
+                const currentTags = new Set<string>()
+                let earliestDate = ''
+                registeredEvents.forEach(ev => {
+                  if (ev.tags && Array.isArray(ev.tags)) {
+                    ev.tags.forEach((t: string) => currentTags.add(t))
+                  }
+                  const evDate = ev.start.split('T')[0]
+                  if (!earliestDate || evDate < earliestDate) earliestDate = evDate
+                })
+
+                if (currentTags.size > 0 && earliestDate) {
+                  // 90日(約3ヶ月)以上前を「去年等の過去データ」とみなす閾値
+                  const cutoffDate = new Date(new Date(earliestDate).getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+                  
+                  const { data: pastPrints } = await supabase
+                    .from('school_prints')
+                    .select('id, canonical_tags')
+                    .eq('user_id', userId)
+                    .lt('event_date', cutoffDate)
+                    .overlaps('canonical_tags', Array.from(currentTags))
+                    .order('event_date', { ascending: false })
+                    .limit(1)
+
+                  if (pastPrints && pastPrints.length > 0) {
+                    const pastPrint = pastPrints[0]
+                    const matchedTag = pastPrint.canonical_tags?.find((t: string) => currentTags.has(t)) || '行事'
+                    const pastRecordBubble = createPastRecordBubble(matchedTag, pastPrint.id)
+                    replyMessages.push({
+                      type: 'flex',
+                      altText: '💡 去年の記録を発見しました',
+                      contents: pastRecordBubble
+                    })
+                  }
+                }
+             } catch (e) {
+                console.error('Past record search error:', e)
+             }
+
              await client.replyMessage({
                 replyToken: event.replyToken,
-                messages: replyMessages as any
+                messages: replyMessages
              })
 
          } catch (e: any) {
@@ -1087,6 +1128,44 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
           messages: rescueMessages as any
         })
       }
+
+      // Restore機能 (過去の記録を見る)
+      if (action === 'restore_past') {
+        const printId = data.get('printId')
+        if (!printId) continue
+
+        const { data: printData } = await supabase
+          .from('school_prints')
+          .select('image_path, full_ocr_text, canonical_tags, event_date')
+          .eq('id', printId)
+          .single()
+
+        if (!printData) {
+           await client.replyMessage({ replyToken: event.replyToken, messages: [{ type: 'text', text: '記録が見つかりませんでした🙏' }] })
+           continue
+        }
+
+        const tag = printData.canonical_tags && printData.canonical_tags.length > 0 ? printData.canonical_tags[0] : '行事'
+        let imageUrl = null
+        if (printData.image_path) {
+           const { data: signedUrlData } = await supabase.storage.from('prints').createSignedUrl(printData.image_path, 60 * 60 * 24)
+           imageUrl = signedUrlData?.signedUrl || null
+        }
+
+        const restoreBubble = createRestoredPrintBubble(tag, printData.full_ocr_text || '', imageUrl)
+
+        await supabase.from('school_prints').update({ is_restored: true }).eq('id', printId)
+
+        await client.replyMessage({
+          replyToken: event.replyToken,
+          messages: [{
+            type: 'flex',
+            altText: `🔙 去年の【${tag}】の記録`,
+            contents: restoreBubble
+          }]
+        })
+      }
+
       continue
     }
 
@@ -1143,4 +1222,64 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
   }
 }
 
-export default app
+// --- Scheduled Task (Cron) ---
+async function handleScheduled(event: any, env: Bindings) {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_KEY)
+  const client = new messagingApi.MessagingApiClient({ channelAccessToken: env.LINE_CHANNEL_ACCESS_TOKEN })
+
+  // JSTで3日後の日付文字列 (YYYY-MM-DD) を取得
+  const targetDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+  const jstTarget = new Date(targetDate.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }))
+  
+  // yyyy-mm-dd にフォーマット
+  const year = jstTarget.getFullYear()
+  const month = String(jstTarget.getMonth() + 1).padStart(2, '0')
+  const day = String(jstTarget.getDate()).padStart(2, '0')
+  const targetDateStr = `${year}-${month}-${day}`
+
+  // 3日後に行われるイベントを取得
+  const { data: upcomingEvents } = await supabase
+    .from('calendar_events')
+    .select('user_id, summary, start_time')
+    .like('start_time', `${targetDateStr}%`)
+
+  if (!upcomingEvents || upcomingEvents.length === 0) return
+
+  const userEvents: Record<string, any[]> = {}
+  upcomingEvents.forEach(ev => {
+    if (!userEvents[ev.user_id]) userEvents[ev.user_id] = []
+    userEvents[ev.user_id].push(ev)
+  })
+
+  // ユーザーごとにまとめて送信（最大5件まで）
+  for (const [userId, events] of Object.entries(userEvents)) {
+    const limitedEvents = events.slice(0, 5)
+    const messages = limitedEvents.map(ev => {
+      // 2026-05-26T09:00:00+09:00 -> 05/26 09:00
+      const datePart = ev.start_time.slice(5, 10).replace('-', '/')
+      const timePart = (ev.start_time.includes('T') && ev.start_time.length > 10) ? ev.start_time.slice(11, 16) : ''
+      const timeStr = timePart === '00:00' ? datePart : (timePart ? `${datePart} ${timePart}` : datePart)
+
+      return {
+        type: 'text',
+        text: `🔔 まもなく【${sanitizeText(ev.summary, 20)}】ですね！\n（${timeStr}）\n\n準備はバッチリですか？忘れ物がないか確認しましょう！`
+      }
+    })
+
+    try {
+      await client.pushMessage({
+        to: userId,
+        messages: messages as any
+      })
+    } catch (e) {
+      console.error(`Failed to send reminder to ${userId}:`, e)
+    }
+  }
+}
+
+export default {
+  fetch: app.fetch,
+  scheduled(event: any, env: Bindings, ctx: any) {
+    ctx.waitUntil(handleScheduled(event, env))
+  }
+}
