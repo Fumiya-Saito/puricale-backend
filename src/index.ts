@@ -321,10 +321,11 @@ app.get('/settings', async (c) => {
 
   const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
   
-  // ユーザー設定（キーワード + カレンダーID）を取得
-  const { data: userData } = await supabase.from('users').select('keywords, calendar_id').eq('line_user_id', userId).single()
+  // ユーザー設定（キーワード + カレンダーID + 子供設定）を取得
+  const { data: userData } = await supabase.from('users').select('keywords, calendar_id, child_settings').eq('line_user_id', userId).single()
   const keywords: string[] = userData?.keywords || []
   const currentCalendarId = userData?.calendar_id || 'primary'
+  const childSettings: any[] = userData?.child_settings || []
 
   // カレンダー一覧を取得
   let calendars: any[] = []
@@ -422,10 +423,9 @@ app.get('/settings', async (c) => {
         <main>
           
           <section>
-            <h3>📅 予定の登録先（誰のカレンダー？）</h3>
+            <h3>👪 家族共有カレンダー（ベース）</h3>
             <p>
-              プリントの予定を書き込むカレンダーを選んでください。<br>
-              <small>例: 「家族共有用」や「お子様専用」のカレンダーに分けることができます。</small>
+              お子様個人を特定できない予定（全校行事・保護者会など）や、AIが判断に迷った予定はすべてここに入ります。
             </p>
             
             <form action="/settings/update_calendar" method="POST">
@@ -438,45 +438,71 @@ app.get('/settings', async (c) => {
                   <span class="cal-color" style="background-color:${c.backgroundColor}"></span>
                   <div>
                     <span class="cal-name">${sanitizeText(c.summary, 20)}</span>
-                    ${c.primary ? '<span class="cal-badge">いつものカレンダー</span>' : ''}
-                    ${c.summary.includes('ファミリー') || c.summary.includes('家族') ? '<span class="cal-badge">家族共有</span>' : ''}
+                    ${c.primary ? '<span class="cal-badge">メイン</span>' : ''}
                   </div>
                 </label>
               `).join('')}
               </div>
-              
-              <button type="submit" style="margin-top:20px;">保存先を変更する</button>
+              <button type="submit" style="margin-top:15px; padding:8px;">共有カレンダーを保存</button>
             </form>
           </section>
 
           <section>
-            <h3>⚙️ 抽出するキーワード（学年・クラス）</h3>
+            <h3>👦👧 お子様別のカレンダー設定</h3>
             <p>
-              自分に関係のある行事だけを自動でピックアップします。<br>
-              <small>※何も設定しないと、プリントに書かれた全ての行事が登録されます。</small>
+              お子様の学年・クラスに完全に一致したプリントだけを、専用のカレンダーに自動で振り分けます。
             </p>
+
+            <!-- 登録済みのお子様リスト -->
+            ${childSettings.map((child: any) => `
+              <article style="padding:15px; margin-bottom:15px; border:1px solid #ddd; background:#fafafa;">
+                <h4 style="margin:0 0 10px 0; font-size:1rem; display:flex; justify-content:space-between; align-items:center;">
+                  <span>👤 ${sanitizeText(child.name, 20)}</span>
+                  <form action="/settings/delete_child" method="POST" style="margin:0;" onsubmit="return confirm('削除しますか？')">
+                    <input type="hidden" name="child_id" value="${child.id}">
+                    <button type="submit" style="background:none; border:none; color:#e74c3c; padding:0; width:auto; font-size:0.9rem;">削除</button>
+                  </form>
+                </h4>
+                
+                <div style="font-size:0.85rem; margin-bottom:8px;">
+                  <strong>保存先:</strong> ${sanitizeText(calendars.find(c => c.id === child.calendar_id)?.summary || '不明', 30)}
+                </div>
+                
+                <div style="font-size:0.85rem; display:flex; align-items:center; flex-wrap:wrap; gap:4px;">
+                  <strong>キーワード:</strong> 
+                  ${child.keywords.map((k: string) => `<span class="tag" style="font-size:0.8rem; padding:2px 8px;">${sanitizeText(k, 15)}</span>`).join('')}
+                </div>
+              </article>
+            `).join('')}
             
-            <article style="border:none; padding:0; box-shadow:none;">
-              <div style="margin-bottom:15px;">
-                ${keywords.length === 0 ? '<small>設定なし（全件登録）</small>' : ''}
-                ${keywords.map((k: string) => `
-                  <span class="tag">
-                    ${sanitizeText(k, 20)}
-                    <form action="/settings/update" method="POST" style="display:inline">
-                      <input type="hidden" name="action" value="delete">
-                      <input type="hidden" name="word" value="${sanitizeText(k)}">
-                      <button type="submit" class="del">×</button>
-                    </form>
-                  </span>
-                `).join('')}
-              </div>
-              
-              <form action="/settings/update" method="POST" style="display:flex; gap:10px;">
-                <input type="hidden" name="action" value="add">
-                <input type="text" name="word" placeholder="例: 1年2組, 年長" required maxlength="20" style="margin-bottom:0;">
-                <button type="submit" class="secondary" style="width:auto; white-space:nowrap;">追加</button>
+            ${childSettings.length === 0 ? '<p style="color:#666; font-size:0.9rem;">設定されていません。</p>' : ''}
+
+            <!-- 新規追加フォーム -->
+            <details style="margin-top:20px;">
+              <summary style="font-weight:bold; color:#3498db; cursor:pointer;">＋ お子様を追加する</summary>
+              <form action="/settings/add_child" method="POST" style="margin-top:15px; padding:15px; border:2px dashed #ccc; border-radius:8px;">
+                <label>
+                  お名前（表示用）
+                  <input type="text" name="name" required placeholder="例: 長男" maxlength="20">
+                </label>
+                
+                <label>
+                  カレンダー選択
+                  <select name="calendar_id" required>
+                    <option value="" disabled selected>選択してください</option>
+                    ${calendars.map((c: any) => `<option value="${c.id}">${sanitizeText(c.summary, 30)}</option>`).join('')}
+                  </select>
+                </label>
+
+                <label>
+                  キーワード（カンマ区切り）
+                  <input type="text" name="keywords" required placeholder="例: 1年, 1-2" maxlength="50">
+                  <small>プリントにこの文字があった場合のみ、この子のカレンダーに入れます。</small>
+                </label>
+
+                <button type="submit" style="margin-bottom:0;">追加する</button>
               </form>
-            </article>
+            </details>
           </section>
 
           <section>
@@ -515,8 +541,8 @@ app.post('/settings/update_calendar', async (c) => {
   return c.redirect('/settings')
 })
 
-// Update Action
-app.post('/settings/update', async (c) => {
+// Add Child Action
+app.post('/settings/add_child', async (c) => {
   const token = getCookie(c, 'auth_token')
   if (!token) return c.text('Session Error', 403)
   
@@ -527,23 +553,51 @@ app.post('/settings/update', async (c) => {
   } catch (e) { return c.text('Invalid Session', 403) }
 
   const body = await c.req.parseBody()
-  const action = body['action']
-  const word = body['word']
+  const name = sanitizeText(body['name'] as string, 20)
+  const calendarId = body['calendar_id'] as string
+  const keywordsRaw = body['keywords'] as string
 
-  if (!word || typeof word !== 'string') return c.redirect('/settings')
-  const safeWord = sanitizeText(word, 20)
-  
-  const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
-  const { data } = await supabase.from('users').select('keywords').eq('line_user_id', userId).single()
-  let current: string[] = data?.keywords || []
-
-  if (action === 'add' && !current.includes(safeWord)) {
-    current.push(safeWord)
-  } else if (action === 'delete') {
-    current = current.filter((k: string) => k !== safeWord)
+  if (name && calendarId && keywordsRaw) {
+    const keywords = keywordsRaw.split(',').map(k => sanitizeText(k.trim(), 20)).filter(k => k)
+    const newChild = {
+      id: crypto.randomUUID(),
+      name,
+      calendar_id: calendarId,
+      keywords
+    }
+    
+    const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
+    const { data } = await supabase.from('users').select('child_settings').eq('line_user_id', userId).single()
+    const currentSettings = data?.child_settings || []
+    currentSettings.push(newChild)
+    
+    await supabase.from('users').update({ child_settings: currentSettings }).eq('line_user_id', userId)
   }
+  return c.redirect('/settings')
+})
 
-  await supabase.from('users').update({ keywords: current }).eq('line_user_id', userId)
+// Delete Child Action
+app.post('/settings/delete_child', async (c) => {
+  const token = getCookie(c, 'auth_token')
+  if (!token) return c.text('Session Error', 403)
+  
+  let userId
+  try {
+    const payload = await verify(token, c.env.JWT_SECRET, 'HS256')
+    userId = payload.sub as string
+  } catch (e) { return c.text('Invalid Session', 403) }
+
+  const body = await c.req.parseBody()
+  const childId = body['child_id'] as string
+
+  if (childId) {
+    const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
+    const { data } = await supabase.from('users').select('child_settings').eq('line_user_id', userId).single()
+    const currentSettings = data?.child_settings || []
+    const updatedSettings = currentSettings.filter((child: any) => child.id !== childId)
+    
+    await supabase.from('users').update({ child_settings: updatedSettings }).eq('line_user_id', userId)
+  }
   return c.redirect('/settings')
 })
 
@@ -562,7 +616,7 @@ app.get('/export/data', async (c) => {
 
   // ユーザー設定 & 登録イベントを並列取得
   const [{ data: userData }, { data: events }] = await Promise.all([
-    supabase.from('users').select('keywords, calendar_id').eq('line_user_id', userId).single(),
+    supabase.from('users').select('keywords, calendar_id, child_settings').eq('line_user_id', userId).single(),
     supabase.from('calendar_events')
       .select('summary, start_time, google_event_id, source_message_id, created_at')
       .eq('user_id', userId)
@@ -574,8 +628,9 @@ app.get('/export/data', async (c) => {
     service: 'プリカレ (Puricale)',
     note: 'このデータはあなた自身のものです。いつでも安全に保存・移行できます。',
     settings: {
-      keywords: userData?.keywords || [],
       calendar_id: userData?.calendar_id || 'primary',
+      child_settings: userData?.child_settings || [],
+      legacy_keywords: userData?.keywords || [],
     },
     registered_events: (events || []).map(ev => ({
       summary: ev.summary,
@@ -650,10 +705,11 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
 
          try {
              // ユーザー情報・認証取得
-             const { data: userData } = await supabase.from('users').select('keywords, calendar_id').eq('line_user_id', userId).single()
+             const { data: userData } = await supabase.from('users').select('keywords, calendar_id, child_settings').eq('line_user_id', userId).single()
              const { data: authData } = await supabase.from('google_auth').select('*').eq('user_id', userId).single()
              const userKeywords: string[] = userData?.keywords || []
-             const targetCalendarId = userData?.calendar_id || 'primary'
+             const sharedCalendarId = userData?.calendar_id || 'primary'
+             const childSettings: any[] = userData?.child_settings || []
 
              if (!authData) {
                 const payload = { sub: userId, exp: Math.floor(Date.now() / 1000) + 600 }
@@ -695,12 +751,9 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
              3. 時間: 開始時刻不明なら "00:00:00"。「午前保育」等は description に記載。
              
              4. 対象(target) 【重要】: 
-                - 「年少児保護者」のように学年指定がある場合は抽出。
-                - その行事に関係する「学年」「クラス」を【カンマ区切り】で可能な限り列挙・展開せよ。
-                - 表記は「X年Y組」「X年」に統一せよ（例: 「1-2」→「1年2組」）。
-                - クラス行事であっても、親となる学年を含めよ（例: 「1年2組」なら "1年2組, 1年"）。
-                - 範囲指定は展開せよ（例: 「1〜3年」なら "1年, 2年, 3年"）。
-                - 「○月生まれ」「保護者」などの記述は学年指定ではないためターゲットに含めるな。学年指定がなければ空文字 (全員対象) とせよ。
+                - 対象が「特定の1つの学年・クラス」に100%限定できる場合のみ、その学年・クラスを抽出せよ。
+                - 表記は「X年Y組」「X年」に統一せよ（例: 「1-2」→「1年2組」）。クラス行事の場合は親となる学年も含めよ（例: "1年2組, 1年"）。
+                - 複数学年対象（例: 「1〜3年」「全校」）、「保護者対象」、または少しでも対象が曖昧・不明な場合は、誤判定を防ぐため必ず空文字 (全員対象) とせよ。
              
              5. 場所・詳細: locationに場所、descriptionに持ち物や注意事項を記載。
              `
@@ -729,44 +782,67 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
              const keptEvents: any[] = []
              const ignoredEvents: any[] = []
 
-             // ★正規化ロジック (いただいた最新版をそのまま適用)
-             // キーワード正規化ヘルパー: "1-2" -> "12", "1年2組" -> "12" のように揺れを吸収
-             const normalize = (str: string) => str.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)) // 全角数字→半角
-                                                   .replace(/[-－ー]/g, '') // ハイフン除去
-                                                   .replace(/[年組生]/g, '') // 単位除去
+             // ★正規化ロジックと振り分け (Phase 5: 自動振り分け・フォールバック)
+             const normalize = (str: string) => str.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+                                                   .replace(/[-－ー]/g, '')
+                                                   .replace(/[年組生]/g, '')
 
              for (const ev of allEvents) {
                const safeTarget = sanitizeText(ev.target, 50)
        
-               // 1. 「以外」「除く」が含まれていたら即除外
                if (safeTarget.includes('以外') || safeTarget.includes('除く')) {
                  ignoredEvents.push(ev)
                  continue 
                }
-       
-               // 2. 双方向チェック (親子関係・表記ゆれ対応)
-               const isMatch = userKeywords.length > 0 && userKeywords.some(kw => {
-                  // A. そのままの文字列で比較 (基本)
-                  if (safeTarget.includes(kw) || (safeTarget.length > 0 && kw.includes(safeTarget))) return true
-                  
-                  // B. 正規化して比較 (救済策: "1-2" vs "1年2組" など)
-                  const nKw = normalize(kw)
-                  const nTarget = normalize(safeTarget)
-                  
-                  // 正規化後の文字数が少なすぎる場合（"1"だけ等）は誤爆防止のためチェックしない
-                  if (nKw.length < 2 || nTarget.length < 2) return false
-                  
-                  return nTarget.includes(nKw) || nKw.includes(nTarget)
-               })
-       
-               const isAll = !safeTarget || safeTarget.includes('全')
-               const noSettings = userKeywords.length === 0
-       
-               if (isAll || noSettings || isMatch) {
-                 keptEvents.push(ev)
-               } else {
-                 ignoredEvents.push(ev)
+
+               let targetCalId = sharedCalendarId
+               let matchedChildName = '家族共有'
+
+               const isAll = !safeTarget || safeTarget.includes('全') || safeTarget.includes('保護者')
+
+               if (!isAll && childSettings.length > 0) {
+                 // 最もマッチする子供を探す
+                 let bestMatch = null
+                 for (const child of childSettings) {
+                   const cKeywords = child.keywords || []
+                   const isMatch = cKeywords.some((kw: string) => {
+                     if (safeTarget.includes(kw) || kw.includes(safeTarget)) return true
+                     const nKw = normalize(kw)
+                     const nTarget = normalize(safeTarget)
+                     if (nKw.length < 2 || nTarget.length < 2) return false
+                     return nTarget.includes(nKw) || nKw.includes(nTarget)
+                   })
+                   
+                   if (isMatch) {
+                     // 複数の子供にマッチした場合（共通イベントや誤判定疑い）は、安全のため共有にフォールバック
+                     if (bestMatch) {
+                       bestMatch = null
+                       break
+                     }
+                     bestMatch = child
+                   }
+                 }
+
+                 if (bestMatch && bestMatch.calendar_id) {
+                   targetCalId = bestMatch.calendar_id
+                   matchedChildName = bestMatch.name || 'お子様'
+                 }
+               } else if (!isAll && childSettings.length === 0 && userKeywords.length > 0) {
+                 // 旧仕様の互換性維持（child_settingsがなく、keywordsが設定されている場合）
+                 const isOldMatch = userKeywords.some((kw: string) => {
+                   if (safeTarget.includes(kw) || kw.includes(safeTarget)) return true
+                   const nKw = normalize(kw)
+                   const nTarget = normalize(safeTarget)
+                   if (nKw.length < 2 || nTarget.length < 2) return false
+                   return nTarget.includes(nKw) || nKw.includes(nTarget)
+                 })
+                 if (!isOldMatch) {
+                   ignoredEvents.push(ev)
+                   continue
+                 }
                }
+
+               keptEvents.push({ ...ev, targetCalendarId: targetCalId, matchedChildName })
              }
 
              // Googleトークンリフレッシュ
@@ -783,9 +859,9 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                 await supabase.from('google_auth').update({ access_token: accessToken, expiry_date: Date.now() + 3500 * 1000 }).eq('user_id', userId)
              }
 
-             // カレンダー登録
+             // カレンダー並列登録
              const calendarPromises = keptEvents.map(async (ev) => {
-               const res = await fetchWithRetry(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(targetCalendarId)}/events`, {
+               const res = await fetchWithRetry(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(ev.targetCalendarId)}/events`, {
                    method: 'POST',
                    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
                    body: JSON.stringify({
@@ -876,16 +952,23 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
            await supabase.from('google_auth').update({ access_token: accessToken, expiry_date: Date.now() + 3500 * 1000 }).eq('user_id', userId)
         }
 
-        const { data: userDataForUndo } = await supabase.from('users').select('calendar_id').eq('line_user_id', userId).single()
+        const { data: userDataForUndo } = await supabase.from('users').select('calendar_id, child_settings').eq('line_user_id', userId).single()
         const calendarIdForUndo = userDataForUndo?.calendar_id || 'primary'
+        const possibleCalendarIds = [calendarIdForUndo, ...(userDataForUndo?.child_settings || []).map((c: any) => c.calendar_id).filter(Boolean)]
 
         let deletedCount = 0
         for (const ev of eventsToDelete) {
-          const res = await fetchWithRetry(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarIdForUndo)}/events/${ev.google_event_id}`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${accessToken}` }
-          })
-          if (res.ok || res.status === 404) deletedCount++
+          // すべての可能性のあるカレンダーから削除を試みる (DB側に登録カレンダーIDがないため)
+          for (const cid of possibleCalendarIds) {
+            const res = await fetchWithRetry(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cid)}/events/${ev.google_event_id}`, {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${accessToken}` }
+            })
+            if (res.ok) { 
+              deletedCount++
+              break 
+            }
+          }
         }
 
         await supabase.from('calendar_events').delete().eq('source_message_id', targetMsgId)

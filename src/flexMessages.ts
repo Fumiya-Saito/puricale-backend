@@ -16,43 +16,51 @@ const formatDate = (isoStart: string) => {
   return timePart === '00:00' ? datePart : (timePart ? `${datePart} ${timePart}` : datePart)
 }
 
-// 1. 【新設】登録された予定の一覧リスト (横スクロール廃止)
+// 1. 【改修】登録された予定の一覧リスト（カレンダー名でグループ化）
 function createRegisteredListBubble(events: any[]): FlexBubble {
-  // 表示件数制限 (最大10件まで表示)
   const MAX_DISPLAY = 10
   const displayEvents = events.slice(0, MAX_DISPLAY)
   const remaining = events.length - MAX_DISPLAY
 
-  // リストの行を作成
-  const eventRows: FlexComponent[] = displayEvents.map(ev => {
-    return {
+  // カレンダー名（マッチした子供名）でグループ化
+  const groupedEvents = displayEvents.reduce((acc, ev) => {
+    const key = ev.matchedChildName || '家族共有'
+    if (!acc[key]) acc[key] = []
+    acc[key].push(ev)
+    return acc
+  }, {} as Record<string, any[]>)
+
+  const bodyContents: FlexComponent[] = []
+
+  for (const [calName, evs] of Object.entries(groupedEvents)) {
+    // グループヘッダー（カレンダー名）
+    bodyContents.push({
       type: 'box',
-      layout: 'baseline',
-      spacing: 'sm',
+      layout: 'horizontal',
+      margin: bodyContents.length === 0 ? 'none' : 'md',
       contents: [
-        {
-          type: 'text',
-          text: formatDate(ev.start),
-          color: '#0367D3', // リンクっぽい青色で強調
-          size: 'sm',
-          flex: 2,
-          weight: 'bold'
-        },
-        {
-          type: 'text',
-          text: safeStr(ev.summary, 20),
-          color: '#333333',
-          size: 'sm',
-          flex: 5,
-          wrap: true
-        }
+        { type: 'text', text: `✅ ${calName}`, weight: 'bold', size: 'sm', color: '#0367D3' }
       ]
-    }
-  })
+    })
+    
+    // そのカレンダーに属するイベントリスト
+    evs.forEach((ev: any) => {
+      bodyContents.push({
+        type: 'box',
+        layout: 'baseline',
+        spacing: 'sm',
+        margin: 'sm',
+        contents: [
+          { type: 'text', text: formatDate(ev.start), color: '#555555', size: 'sm', flex: 2 },
+          { type: 'text', text: safeStr(ev.summary, 20), color: '#333333', size: 'sm', flex: 5, wrap: true }
+        ]
+      })
+    })
+  }
 
   // 「...他 N件」の表示
   if (remaining > 0) {
-    eventRows.push({
+    bodyContents.push({
       type: 'text',
       text: `...他 ${remaining}件`,
       size: 'xs',
@@ -77,7 +85,7 @@ function createRegisteredListBubble(events: any[]): FlexBubble {
       type: 'box',
       layout: 'vertical',
       contents: [
-        ...eventRows,
+        ...bodyContents,
         { type: 'separator', margin: 'lg' },
         {
            type: 'text',
