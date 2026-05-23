@@ -404,6 +404,18 @@ app.get('/settings', async (c) => {
           /* ボタン */
           button[type="submit"] { background-color: #2c3e50; border: none; font-weight: bold; }
           button.secondary { background-color: #95a5a6; }
+          a.export-btn {
+            display: inline-block;
+            background: #2c3e50;
+            color: white !important;
+            text-decoration: none;
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 0.9rem;
+            transition: background 0.2s;
+          }
+          a.export-btn:hover { background: #1a252f; }
         </style>
       </head>
       <body>
@@ -467,6 +479,15 @@ app.get('/settings', async (c) => {
             </article>
           </section>
 
+          <section>
+            <h3>📦 データエクスポート</h3>
+            <p>
+              登録された予定と設定データをJSON形式でダウンロードできます。<br>
+              <small>※ データはあなた自身のものです。いつでも安全に取り出し・保存できます。</small>
+            </p>
+            <a href="/export/data" class="export-btn">📥 JSONでダウンロード</a>
+          </section>
+
         </main>
       </body>
     </html>
@@ -524,6 +545,55 @@ app.post('/settings/update', async (c) => {
 
   await supabase.from('users').update({ keywords: current }).eq('line_user_id', userId)
   return c.redirect('/settings')
+})
+
+// Data Export
+app.get('/export/data', async (c) => {
+  const token = getCookie(c, 'auth_token')
+  if (!token) return c.text('セッション切れです。設定画面から開き直してください。', 403)
+
+  let userId
+  try {
+    const payload = await verify(token, c.env.JWT_SECRET, 'HS256')
+    userId = payload.sub as string
+  } catch (e) { return c.text('Invalid Session', 403) }
+
+  const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
+
+  // ユーザー設定 & 登録イベントを並列取得
+  const [{ data: userData }, { data: events }] = await Promise.all([
+    supabase.from('users').select('keywords, calendar_id').eq('line_user_id', userId).single(),
+    supabase.from('calendar_events')
+      .select('summary, start_time, google_event_id, source_message_id, created_at')
+      .eq('user_id', userId)
+      .order('start_time', { ascending: true })
+  ])
+
+  const exportData = {
+    exported_at: new Date().toISOString(),
+    service: 'プリカレ (Puricale)',
+    note: 'このデータはあなた自身のものです。いつでも安全に保存・移行できます。',
+    settings: {
+      keywords: userData?.keywords || [],
+      calendar_id: userData?.calendar_id || 'primary',
+    },
+    registered_events: (events || []).map(ev => ({
+      summary: ev.summary,
+      start_time: ev.start_time,
+      google_event_id: ev.google_event_id,
+      registered_at: (ev as any).created_at ?? null,
+    })),
+    total_events: (events || []).length,
+  }
+
+  const filename = `puricale-export-${new Date().toISOString().slice(0, 10)}.json`
+
+  return new Response(JSON.stringify(exportData, null, 2), {
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    }
+  })
 })
 
 

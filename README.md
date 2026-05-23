@@ -45,6 +45,7 @@ Cloudflare Workers上で動作し、LINE BotのWebhookを受け取り、Gemini A
 | `/settings` | GET | ユーザー設定画面 |
 | `/settings/update` | POST | キーワード設定の更新 |
 | `/settings/update_calendar` | POST | カレンダー設定の更新 |
+| `/export/data` | GET | 登録データをJSONでダウンロード（要セッション） |
 
 ## ⚙️ 処理フロー
 
