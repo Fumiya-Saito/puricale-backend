@@ -716,7 +716,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
              if (!authData) {
                 const payload = { sub: userId, exp: Math.floor(Date.now() / 1000) + 600 }
                 const token = await sign(payload, env.JWT_SECRET, 'HS256')
-                const lpUrl = `${baseUrl}/auth/landing?userId=${userId}`
+                const lpUrl = `${baseUrl}/auth/landing?userId=${userId}&openExternalBrowser=1`
                 await client.replyMessage({ replyToken: event.replyToken, messages: [{ type: 'text', text: `連携が必要です👇\n${lpUrl}` }] })
                 continue
              }
