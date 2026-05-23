@@ -45,9 +45,11 @@ const EventSchema = z.object({
   end: z.string().nullable().optional(),
   location: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
-  target: z.string().nullable().optional()
+  target: z.string().nullable().optional(),
+  tags: z.array(z.string()).optional()
 })
 const ResponseSchema = z.object({
+  raw_text: z.string().optional(),
   events: z.array(EventSchema)
 })
 
@@ -734,28 +736,32 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
              const now = new Date()
              const jstNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }))
              
-             // ★プロンプト (いただいた最新版をそのまま適用)
+             // ★プロンプト (Phase5: raw_textとtagsを追加)
              const prompt = `あなたは学校プリント解析のプロ。JSON出力のみ。
              本日:${jstNow.toISOString().split('T')[0]} (YYYY-MM-DD)
              
-             スキーマ: { "events": [{ "summary": string, "start": "YYYY-MM-DDTHH:mm:ss", "end": string?, "location": string?, "description": string?, "target": string? }] }
+             スキーマ: { "raw_text": string, "events": [{ "summary": string, "start": "YYYY-MM-DDTHH:mm:ss", "end": string?, "location": string?, "description": string?, "target": string?, "tags": string[] }] }
              
              抽出ルール:
-             1. イベント: 行事予定のみ抽出。「給食の献立」「今月の目標」「校長先生の挨拶」はノイズとして無視。
+             1. raw_text: プリントに書かれている全ての文章（OCR結果）をそのまま1つの文字列として出力せよ。改行も含めること。
              
-             2. 日付 (誤認に注意): 
+             2. イベント: 行事予定のみ抽出。「給食の献立」「今月の目標」「校長先生の挨拶」はノイズとして無視。
+             
+             3. 日付 (誤認に注意): 
                 - 「1年2組」「1-2」のような【学年・クラス表記】を日付(1月2日)と混同するな。これは日付ではない。
                 - 月が明記されていない日付（例: "15日"）は、リストの並び順（時系列）を見て補完せよ。前の行より数字が小さくなった場合（例: 25日の次に3日が来た場合）のみ翌月と判断せよ。
                 - 本日の月と比較し、イベント月が明らかに小さい場合（例: 本日が12月でイベントが1月）は翌年、それ以外は${jstNow.getFullYear()}年とする。
              
-             3. 時間: 開始時刻不明なら "00:00:00"。「午前保育」等は description に記載。
+             4. 時間: 開始時刻不明なら "00:00:00"。「午前保育」等は description に記載。
              
-             4. 対象(target) 【重要】: 
+             5. 対象(target) 【重要】: 
                 - 対象が「特定の1つの学年・クラス」に100%限定できる場合のみ、その学年・クラスを抽出せよ。
                 - 表記は「X年Y組」「X年」に統一せよ（例: 「1-2」→「1年2組」）。クラス行事の場合は親となる学年も含めよ（例: "1年2組, 1年"）。
                 - 複数学年対象（例: 「1〜3年」「全校」）、「保護者対象」、または少しでも対象が曖昧・不明な場合は、誤判定を防ぐため必ず空文字 (全員対象) とせよ。
              
-             5. 場所・詳細: locationに場所、descriptionに持ち物や注意事項を記載。
+             6. 場所・詳細: locationに場所、descriptionに持ち物や注意事項を記載。
+             
+             7. タグ(tags): イベントのカテゴリを表す一般的な単語を配列で出力せよ。（例: "運動会", "遠足", "保護者会", "授業参観", "個人面談", "引き渡し訓練", "集金", "その他"）
              `
 
              const result = await model.generateContent([
@@ -763,11 +769,14 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                 { inlineData: { data: Buffer.from(imageBuffer).toString('base64'), mimeType: "image/jpeg" } }
              ])
              
-             let allEvents = []
+             let allEvents: any[] = []
+             let rawText = ''
              try {
                const cleanJson = extractJson(result.response.text())
                const json = JSON.parse(cleanJson)
-               allEvents = ResponseSchema.parse(json).events
+               const parsed = ResponseSchema.parse(json)
+               allEvents = parsed.events || []
+               rawText = parsed.raw_text || ''
              } catch (e) {
                console.error('Parse Error:', e)
                await client.replyMessage({ replyToken: event.replyToken, messages: [{ type: 'text', text: '読み取れませんでした💦' }] })
@@ -901,6 +910,42 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                  message_id: targetMsgId,
                  ignored_events: ignoredEvents
                })
+             }
+
+             // DB保存: 資産化 (school_prints)
+             try {
+               // 画像アップロード (prints バケットが存在している前提)
+               const { data: uploadData, error: uploadError } = await supabase.storage
+                 .from('prints')
+                 .upload(`public/${userId}/${targetMsgId}.jpg`, imageBuffer, {
+                   contentType: 'image/jpeg',
+                   upsert: true
+                 })
+               
+               const imagePath = uploadError ? null : uploadData?.path
+
+               // Canonical Tagsの収集
+               const allTags = new Set<string>()
+               allEvents.forEach(ev => {
+                 if (ev.tags && Array.isArray(ev.tags)) {
+                   ev.tags.forEach((t: string) => allTags.add(t))
+                 }
+               })
+
+               // 最初のイベントの日付を代表日付とする
+               const eventDate = allEvents.length > 0 ? allEvents[0].start.split('T')[0] : null
+
+               await supabase.from('school_prints').insert({
+                 user_id: userId,
+                 message_id: targetMsgId,
+                 image_path: imagePath,
+                 full_ocr_text: rawText,
+                 canonical_tags: Array.from(allTags),
+                 event_date: eventDate
+               })
+             } catch (e) {
+               console.error('Failed to save school_prints:', e)
+               // ナレッジ保存に失敗しても本処理は止めない
              }
 
              if (registeredEvents.length === 0 && ignoredEvents.length === 0) {
