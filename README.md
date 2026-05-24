@@ -49,15 +49,24 @@ Cloudflare Workers上で動作し、LINE BotのWebhookを受け取り、Gemini A
 
 ## ⚙️ 処理フロー
 
+### 1. カレンダー登録フロー
 ```
 ユーザーがLINEで画像を送信
   └→ 確認バブル（「解析する」ボタン）を返す
        └→ postback: analyze
             ├→ LINE画像取得
             ├→ Gemini APIで解析（イベント・日時・対象学年を抽出）
-            ├→ キーワードフィルタ（学年・クラスで絞り込み）
+            ├→ 兄弟/キーワードごとのカレンダー振り分け
             ├→ Google Calendar に登録
-            └→ Flex Messageで結果表示（Undo / 除外予定の救出ボタン付き）
+            ├→ 過去のプリント（ナレッジ）を検索し、去年の記録があれば通知 👈 Phase 5
+            └→ Flex Messageで結果表示（Undo / 救出ボタン付き）
+```
+
+### 2. リマインド通知フロー (Cron)
+```
+Cloudflare Workers Cron (毎日 12:00 JST)
+  └→ 3日後のカレンダー予定を検索
+       └→ 該当するユーザーへLINEメッセージ（事前リマインド）を送信 👈 Phase 5
 ```
 
 ## 🔑 必要な環境変数
@@ -91,8 +100,13 @@ Cloudflare Workers上で動作し、LINE BotのWebhookを受け取り、Gemini A
 
 ## 📐 設計メモ
 
+## 📐 設計メモ
+
 - **Undo機能**: 登録後30秒以内に取り消し可能。`calendar_events` テーブルに `google_event_id` を保存してGoogleカレンダーから削除
 - **Rescue機能**: キーワードフィルタで除外された予定を `parsing_logs` テーブルに保存し、後から登録可能
+- **複数人（兄弟）対応**: `child_settings` JSONによって、特定のキーワードにマッチした予定を専用のGoogleカレンダーに自動で振り分け
+- **ナレッジ化 (Restore機能)**: 過去のプリントを `school_prints` に保存し、カレンダー登録時に去年の同じ行事をレコメンド。閲覧には「チケット」を消費する仕組み。
+- **事前リマインド**: `wrangler.jsonc` の Cron Trigger を使用し、行事の3日前に自動でLINE通知を送信
 - **トークンリフレッシュ**: アクセストークンの有効期限を確認し、期限切れなら自動リフレッシュ
 - **二重処理防止**: `processed_messages` テーブルへのupsertで解析の冪等性を担保
 
