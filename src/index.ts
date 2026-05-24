@@ -6,7 +6,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 import { messagingApi, WebhookEvent } from '@line/bot-sdk'
 import { z } from 'zod'
 import { sign, verify } from 'hono/jwt'
-import { generateFlexMessages, createConfirmBubble, createSettingsBubble, createHelpBubble, createPastRecordBubble, createRestoredPrintBubble } from './flexMessages'
+import { generateFlexMessages, createConfirmBubble, createSettingsBubble, createHelpBubble, createPastRecordBubble, createRestoredPrintBubble, createNoTicketBubble } from './flexMessages'
 
 type Bindings = {
   GOOGLE_CLIENT_ID: string
@@ -1005,9 +1005,17 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
 
          } catch (e: any) {
              console.error(e)
+             let errorMessage = '処理中にエラーが発生しました💦 しばらく経ってからもう一度お試しください。'
+             
+             if (e.message?.includes('429 Too Many Requests') || e.message?.includes('quota') || e.message?.includes('Quota')) {
+               errorMessage = '現在アクセスが集中しており、AIが一時的にお休みしています🙇‍♂️ しばらく経ってからもう一度お試しください。'
+             } else if (e.message?.includes('Refresh Failed')) {
+               errorMessage = 'Googleカレンダーの連携期限が切れています。プリカレ設定メニューから再度「連携スタート」をお願いします🙏'
+             }
+
              await client.replyMessage({ 
                  replyToken: event.replyToken, 
-                 messages: [{ type: 'text', text: `エラーが発生しました: ${e.message}` }] 
+                 messages: [{ type: 'text', text: errorMessage }] 
              })
          }
       }
@@ -1136,13 +1144,44 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
 
         const { data: printData } = await supabase
           .from('school_prints')
-          .select('image_path, full_ocr_text, canonical_tags, event_date')
+          .select('image_path, full_ocr_text, canonical_tags, event_date, is_restored')
           .eq('id', printId)
           .single()
 
         if (!printData) {
            await client.replyMessage({ replyToken: event.replyToken, messages: [{ type: 'text', text: '記録が見つかりませんでした🙏' }] })
            continue
+        }
+
+        // --- チケット消費ロジック ---
+        let remainingTickets: number | null = null
+        if (!printData.is_restored) {
+          const { data: userData } = await supabase
+            .from('users')
+            .select('is_premium, tickets')
+            .eq('line_user_id', userId)
+            .single()
+            
+          const isPremium = userData?.is_premium || false
+          // 初期値の扱いに注意。カラム追加前はnullになる可能性があるため、nullなら3とするか、スキーマ側でDEFAULT 3とする想定で扱う。
+          let currentTickets = userData?.tickets ?? 3
+
+          if (!isPremium) {
+            if (currentTickets > 0) {
+              currentTickets -= 1
+              await supabase.from('users').update({ tickets: currentTickets }).eq('line_user_id', userId)
+              remainingTickets = currentTickets
+            } else {
+              // チケット不足
+              const premiumUrl = 'https://puricale.jp' // 本来は決済ページのURL
+              const noTicketBubble = createNoTicketBubble(premiumUrl)
+              await client.replyMessage({
+                replyToken: event.replyToken,
+                messages: [{ type: 'flex', altText: '🎟️ チケットが不足しています', contents: noTicketBubble }]
+              })
+              continue
+            }
+          }
         }
 
         const tag = printData.canonical_tags && printData.canonical_tags.length > 0 ? printData.canonical_tags[0] : '行事'
@@ -1152,9 +1191,11 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
            imageUrl = signedUrlData?.signedUrl || null
         }
 
-        const restoreBubble = createRestoredPrintBubble(tag, printData.full_ocr_text || '', imageUrl)
+        const restoreBubble = createRestoredPrintBubble(tag, printData.full_ocr_text || '', imageUrl, remainingTickets)
 
-        await supabase.from('school_prints').update({ is_restored: true }).eq('id', printId)
+        if (!printData.is_restored) {
+          await supabase.from('school_prints').update({ is_restored: true }).eq('id', printId)
+        }
 
         await client.replyMessage({
           replyToken: event.replyToken,
