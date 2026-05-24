@@ -1177,7 +1177,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
               const noTicketBubble = createNoTicketBubble(premiumUrl)
               await client.replyMessage({
                 replyToken: event.replyToken,
-                messages: [{ type: 'flex', altText: '🎟️ チケットが不足しています', contents: noTicketBubble }]
+                messages: [{ type: 'flex', altText: '🎟️ チケットが不足しています', contents: noTicketBubble as any }]
               })
               continue
             }
