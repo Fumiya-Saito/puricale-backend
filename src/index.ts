@@ -1202,7 +1202,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
           messages: [{
             type: 'flex',
             altText: `🔙 去年の【${tag}】の記録`,
-            contents: restoreBubble
+            contents: restoreBubble as any
           }]
         })
       }
