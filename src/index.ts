@@ -794,14 +794,18 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                } 
              })
 
-             const result = await generateContentWithRetry(model, [
+             const promptParts = [
                "画像を解析し、JSONで出力してください。",
                { inlineData: { data: Buffer.from(imageBuffer).toString('base64'), mimeType: "image/jpeg" } }
-             ])
-             
+             ]
+
              let allEvents: any[] = []
              let rawText = ''
              try {
+               const result = await Promise.race([
+                   generateContentWithRetry(model, promptParts),
+                   new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 23000))
+               ])
                const jsonText = result.response.text()
                const json = JSON.parse(jsonText)
                const parsed = ResponseSchema.parse(json)
@@ -1049,6 +1053,8 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                errorMessage = '現在アクセスが集中しており、AIが一時的にお休みしています🙇‍♂️ しばらく経ってからもう一度お試しください。'
              } else if (e.message?.includes('Refresh Failed')) {
                errorMessage = 'Googleカレンダーの連携期限が切れています。プリカレ設定メニューから再度「連携スタート」をお願いします🙏'
+             } else if (e.message === 'Timeout') {
+               errorMessage = 'ごめんなさい💦 画像が複雑すぎるかサーバーが混み合っており、LINEの応答制限時間（30秒）を超過してしまいました。お手数ですが、プリントの全体ではなく半分ずつ撮影するなど、小分けにして送ってみてください🙏'
              }
 
              try {
