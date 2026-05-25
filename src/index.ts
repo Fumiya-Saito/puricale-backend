@@ -1035,6 +1035,10 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
 
          } catch (e: any) {
              console.error(e)
+             
+             // エラー時はロックを解除して再試行可能にする
+             await supabase.from('processed_messages').delete().eq('message_id', targetMsgId)
+
              let errorMessage = '処理中にエラーが発生しました💦 しばらく経ってからもう一度お試しください。'
              
              if (e.message?.includes('429 Too Many Requests') || e.message?.includes('quota') || e.message?.includes('Quota')) {
