@@ -22,7 +22,6 @@ type Bindings = {
   ENVIRONMENT?: string
   LINE_LIFF_ID: string
   LINE_CHANNEL_ID: string
-  GEMINI_MODEL_NAME?: string
 }
 
 type GoogleTokenResponse = {
@@ -684,7 +683,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
   const client = new messagingApi.MessagingApiClient({ channelAccessToken: env.LINE_CHANNEL_ACCESS_TOKEN })
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_KEY)
   const allowedUsers = env.ALLOWED_USERS ? env.ALLOWED_USERS.split(',') : []
-  const MODEL_NAME = env.GEMINI_MODEL_NAME || 'gemini-2.0-flash'
+  const MODEL_NAME = 'gemini-2.0-flash'
   const baseUrl = new URL(reqUrl).origin
   
   for (const event of events) {

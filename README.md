@@ -88,7 +88,6 @@ Cloudflare Workers Cron (毎日 12:00 JST)
 | `JWT_SECRET` | セッション署名用シークレット |
 | `ALLOWED_USERS` | アクセス許可するLINEユーザーID（カンマ区切り、αテスト用） |
 | `ENVIRONMENT` | `local` を指定するとCookieのSecure属性をOFFにする |
-| `GEMINI_MODEL_NAME` | (任意) Geminiのモデル名。未指定時は `gemini-2.0-flash` |
 
 ## 🧞 コマンド
 
