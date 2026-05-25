@@ -809,7 +809,11 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                rawText = parsed.raw_text || ''
              } catch (e) {
                console.error('Parse Error:', e)
-               await client.replyMessage({ replyToken: event.replyToken, messages: [{ type: 'text', text: '読み取れませんでした💦' }] })
+               try {
+                 await client.replyMessage({ replyToken: event.replyToken, messages: [{ type: 'text', text: '読み取れませんでした💦' }] })
+               } catch (err) {
+                 await client.pushMessage({ to: userId, messages: [{ type: 'text', text: '読み取れませんでした💦' }] })
+               }
                continue
              }
 
@@ -1047,10 +1051,17 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                errorMessage = 'Googleカレンダーの連携期限が切れています。プリカレ設定メニューから再度「連携スタート」をお願いします🙏'
              }
 
-             await client.replyMessage({ 
-                 replyToken: event.replyToken, 
-                 messages: [{ type: 'text', text: errorMessage }] 
-             })
+             try {
+                 await client.replyMessage({ 
+                     replyToken: event.replyToken, 
+                     messages: [{ type: 'text', text: errorMessage }] 
+                 })
+             } catch (replyErr) {
+                 await client.pushMessage({
+                     to: userId,
+                     messages: [{ type: 'text', text: errorMessage }]
+                 })
+             }
          }
       }
 
