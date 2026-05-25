@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { getCookie, setCookie } from 'hono/cookie'
 import { csrf } from 'hono/csrf'
 import { createClient } from '@supabase/supabase-js'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai'
 import { messagingApi, WebhookEvent } from '@line/bot-sdk'
 import { z } from 'zod'
 import { sign, verify } from 'hono/jwt'
@@ -75,14 +75,19 @@ function sanitizeText(text?: string | null, maxLength = 500): string {
   return cleaned.length > maxLength ? cleaned.slice(0, maxLength) + '...' : cleaned
 }
 
-function extractJson(text: string): string {
-  let cleanText = text.replace(/```json|```/g, '').trim()
-  const firstOpen = cleanText.indexOf('{')
-  const lastClose = cleanText.lastIndexOf('}')
-  if (firstOpen !== -1 && lastClose !== -1) {
-    cleanText = cleanText.substring(firstOpen, lastClose + 1)
+async function generateContentWithRetry(model: any, promptParts: any[], maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await model.generateContent(promptParts)
+    } catch (err: any) {
+      if (err.message && err.message.includes('429') && i < maxRetries - 1) {
+        console.log(`429 Hit. Retrying in ${Math.pow(2, i) * 2} seconds...`)
+        await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 2000))
+        continue
+      }
+      throw err
+    }
   }
-  return cleanText.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']')
 }
 
 async function verifyLineSignature(body: string, signature: string, secret: string): Promise<boolean> {
@@ -731,49 +736,74 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
 
              // Gemini API 呼び出し
              const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY)
-             const model = genAI.getGenerativeModel({ model: MODEL_NAME, generationConfig: { responseMimeType: "application/json" } })
-             
              const now = new Date()
              const jstNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }))
              
-             // ★プロンプト (Phase5: raw_textとtagsを追加)
-             const prompt = `あなたは学校プリント解析のプロ。JSON出力のみ。
-             本日:${jstNow.toISOString().split('T')[0]} (YYYY-MM-DD)
+             // System Instruction
+             const systemInstruction = `あなたは学校プリント解析のプロフェッショナルです。
+             必ず指定されたJSONスキーマに従って出力してください。
+             【重要】学校や保育園のプリント・予定表ではない画像（関係のない写真やイラストなど）の場合は、イベントを抽出せず、直ちに空の配列を返してください。
              
-             スキーマ: { "raw_text": string, "events": [{ "summary": string, "start": "YYYY-MM-DDTHH:mm:ss", "end": string?, "location": string?, "description": string?, "target": string?, "tags": string[] }] }
+             本日: ${jstNow.toISOString().split('T')[0]} (YYYY-MM-DD)
              
              抽出ルール:
              1. raw_text: プリントに書かれている全ての文章（OCR結果）をそのまま1つの文字列として出力せよ。改行も含めること。
-             
              2. イベント: 行事予定のみ抽出。「給食の献立」「今月の目標」「校長先生の挨拶」はノイズとして無視。
-             
              3. 日付 (誤認に注意): 
                 - 「1年2組」「1-2」のような【学年・クラス表記】を日付(1月2日)と混同するな。これは日付ではない。
-                - 月が明記されていない日付（例: "15日"）は、リストの並び順（時系列）を見て補完せよ。前の行より数字が小さくなった場合（例: 25日の次に3日が来た場合）のみ翌月と判断せよ。
+                - 月が明記されていない日付（例: "15日"）は、リストの並び順（時系列）を見て補完せよ。前の行より数字が小さくなった場合のみ翌月と判断せよ。
                 - 本日の月と比較し、イベント月が明らかに小さい場合（例: 本日が12月でイベントが1月）は翌年、それ以外は${jstNow.getFullYear()}年とする。
-             
              4. 時間: 開始時刻不明なら "00:00:00"。「午前保育」等は description に記載。
-             
              5. 対象(target) 【重要】: 
                 - 対象が「特定の1つの学年・クラス」に100%限定できる場合のみ、その学年・クラスを抽出せよ。
-                - 表記は「X年Y組」「X年」に統一せよ（例: 「1-2」→「1年2組」）。クラス行事の場合は親となる学年も含めよ（例: "1年2組, 1年"）。
-                - 複数学年対象（例: 「1〜3年」「全校」）、「保護者対象」、または少しでも対象が曖昧・不明な場合は、誤判定を防ぐため必ず空文字 (全員対象) とせよ。
-             
+                - 表記は「X年Y組」「X年」に統一せよ。
+                - 複数学年対象、または少しでも曖昧な場合は誤判定を防ぐため必ず空文字(全員対象)とせよ。
              6. 場所・詳細: locationに場所、descriptionに持ち物や注意事項を記載。
-             
-             7. タグ(tags): イベントのカテゴリを表す一般的な単語を配列で出力せよ。（例: "運動会", "遠足", "保護者会", "授業参観", "個人面談", "引き渡し訓練", "集金", "その他"）
-             `
+             7. タグ(tags): イベントのカテゴリを表す一般的な単語を配列で出力せよ。（例: "運動会", "遠足", "保護者会", "授業参観", "個人面談", "引き渡し訓練", "集金", "その他"）`
 
-             const result = await model.generateContent([
-                prompt,
-                { inlineData: { data: Buffer.from(imageBuffer).toString('base64'), mimeType: "image/jpeg" } }
+             const responseSchema = {
+               type: SchemaType.OBJECT,
+               properties: {
+                 raw_text: { type: SchemaType.STRING, description: "プリントの全文OCR結果" },
+                 events: {
+                   type: SchemaType.ARRAY,
+                   items: {
+                     type: SchemaType.OBJECT,
+                     properties: {
+                       summary: { type: SchemaType.STRING },
+                       start: { type: SchemaType.STRING, description: "YYYY-MM-DDTHH:mm:ss" },
+                       end: { type: SchemaType.STRING, nullable: true },
+                       location: { type: SchemaType.STRING, nullable: true },
+                       description: { type: SchemaType.STRING, nullable: true },
+                       target: { type: SchemaType.STRING, nullable: true },
+                       tags: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } }
+                     },
+                     required: ["summary", "start"]
+                   }
+                 }
+               },
+               required: ["events"]
+             }
+
+             const model = genAI.getGenerativeModel({ 
+               model: MODEL_NAME,
+               systemInstruction: systemInstruction,
+               generationConfig: { 
+                 responseMimeType: "application/json",
+                 responseSchema: responseSchema
+               } 
+             })
+
+             const result = await generateContentWithRetry(model, [
+               "画像を解析し、JSONで出力してください。",
+               { inlineData: { data: Buffer.from(imageBuffer).toString('base64'), mimeType: "image/jpeg" } }
              ])
              
              let allEvents: any[] = []
              let rawText = ''
              try {
-               const cleanJson = extractJson(result.response.text())
-               const json = JSON.parse(cleanJson)
+               const jsonText = result.response.text()
+               const json = JSON.parse(jsonText)
                const parsed = ResponseSchema.parse(json)
                allEvents = parsed.events || []
                rawText = parsed.raw_text || ''
