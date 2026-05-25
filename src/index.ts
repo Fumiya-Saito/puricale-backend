@@ -791,7 +791,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                systemInstruction: systemInstruction,
                generationConfig: { 
                  responseMimeType: "application/json",
-                 responseSchema: responseSchema
+                 responseSchema: responseSchema as any
                } 
              })
 
