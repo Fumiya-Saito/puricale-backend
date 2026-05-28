@@ -1347,7 +1347,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
               remainingTickets = currentTickets
             } else {
               // チケット不足
-              const premiumUrl = 'https://puricale.jp' // 本来は決済ページのURL
+              const premiumUrl = `https://liff.line.me/${env.LINE_LIFF_ID}/premium`
               const noTicketBubble = createNoTicketBubble(premiumUrl)
               await client.replyMessage({
                 replyToken: event.replyToken,
