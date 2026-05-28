@@ -799,10 +799,9 @@ app.post('/webhook', async (c) => {
 
   const body = JSON.parse(rawBody)
   // ログ出力のためにcatchを追加
-  c.executionCtx.waitUntil(
-      handleEvents(body.events, ENV, c.req.url)
-        .catch(err => console.error('🚨 Global Error in handleEvents:', err))
-  )
+  handleEvents(body.events, ENV, c.req.url)
+    .catch(err => console.error('🚨 Global Error in handleEvents:', err))
+  
   return c.json({ message: 'ok' })
 })
 
