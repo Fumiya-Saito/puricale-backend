@@ -24,6 +24,7 @@ type Bindings = {
   JWT_SECRET: string
   ENVIRONMENT?: string
   LINE_LIFF_ID: string
+  LINE_LIFF_ID_PREMIUM: string
   LINE_CHANNEL_ID: string
   CRON_SECRET: string
   STRIPE_SECRET_KEY: string
@@ -186,8 +187,8 @@ app.post('/api/create-checkout-session', async (c) => {
     payment_method_types: ['card'],
     line_items: [{ price: actualPriceId, quantity: 1 }],
     mode: isSubscription ? 'subscription' : 'payment',
-    success_url: `https://liff.line.me/${ENV.LINE_LIFF_ID}/premium?success=true`,
-    cancel_url: `https://liff.line.me/${ENV.LINE_LIFF_ID}/premium?canceled=true`,
+    success_url: `https://liff.line.me/${ENV.LINE_LIFF_ID_PREMIUM}/premium?success=true`,
+    cancel_url: `https://liff.line.me/${ENV.LINE_LIFF_ID_PREMIUM}/premium?canceled=true`,
     metadata: { line_user_id: userId, isSubscription: isSubscription ? 'true' : 'false' }
   });
 
@@ -1347,7 +1348,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
               remainingTickets = currentTickets
             } else {
               // チケット不足
-              const premiumUrl = `https://liff.line.me/${env.LINE_LIFF_ID}/premium`
+              const premiumUrl = `https://liff.line.me/${env.LINE_LIFF_ID_PREMIUM}/premium`
               const noTicketBubble = createNoTicketBubble(premiumUrl)
               await client.replyMessage({
                 replyToken: event.replyToken,
