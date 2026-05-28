@@ -158,7 +158,7 @@ function normalizeTags(rawTags: string[]): string[] {
 
 // --- Stripe Integration ---
 app.post('/api/create-checkout-session', async (c) => {
-  const stripe = new Stripe(ENV.STRIPE_SECRET_KEY, { apiVersion: '2025-01-27.acacia' });
+  const stripe = new Stripe(ENV.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' });
   const body = await c.req.json();
   const userId = body.userId;
   const requestedPrice = body.priceId;
@@ -195,7 +195,7 @@ app.post('/api/create-checkout-session', async (c) => {
 });
 
 app.post('/api/stripe-webhook', async (c) => {
-  const stripe = new Stripe(ENV.STRIPE_SECRET_KEY, { apiVersion: '2025-01-27.acacia' });
+  const stripe = new Stripe(ENV.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' });
   const sig = c.req.header('stripe-signature');
   const body = await c.req.text();
 
