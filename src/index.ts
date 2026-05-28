@@ -928,10 +928,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
              let allEvents: any[] = []
              let rawText = ''
              try {
-               const result = await Promise.race([
-                   generateContentWithRetry(model, promptParts),
-                   new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 23000))
-               ])
+               const result = await generateContentWithRetry(model, promptParts)
                const jsonText = result.response.text()
                const json = JSON.parse(jsonText)
                const parsed = ResponseSchema.parse(json)
