@@ -2,17 +2,17 @@
 
 学校プリントをAIで解析し、Googleカレンダーに自動登録するLINE Botのバックエンドシステム。
 
-## 🌐 サービス概要
+## 🌐 サービス概要 (B2C SaaS)
 
-**プリカレ**のバックエンドAPIサーバーです。  
-Cloudflare Workers上で動作し、LINE BotのWebhookを受け取り、Gemini AIによる画像解析とGoogle Calendar APIへの登録を担います。
+**プリカレ**は、多忙な子育て世帯等の**一般ユーザー向けに広く提供される商用SaaS**のバックエンドAPIサーバーです。  
+Google Cloud Run上で動作し、LINE BotのWebhookを受け取り、Gemini AIによる画像解析とGoogle Calendar APIへの登録を担います。
 
 - **サービスURL**: https://puricale.jp
 - **LINE公式アカウント**: https://lin.ee/XnxBBmG
 
 ## 🛠 技術スタック
 
-- **ランタイム**: [Cloudflare Workers](https://workers.cloudflare.com/)
+- **ランタイム**: [Google Cloud Run](https://cloud.google.com/run) (Node.js)
 - **フレームワーク**: [Hono](https://hono.dev/) v4
 - **AI**: Google Gemini API (`gemini-2.0-flash`) — 画像OCR・イベント抽出
 - **DB**: [Supabase](https://supabase.com/) — ユーザー情報・認証・イベントログ
@@ -27,8 +27,8 @@ Cloudflare Workers上で動作し、LINE BotのWebhookを受け取り、Gemini A
 │   └── flexMessages.ts   # LINE Flex Message UI生成
 ├── docs/
 │   └── CONCEPT.md        # プロダクト仕様書 v9.1
-├── .dev.vars             # ローカル開発用の環境変数（git管理外）
-├── wrangler.jsonc        # Cloudflare Workers設定
+├── .env                  # ローカル開発・本番用の環境変数（git管理外）
+├── Dockerfile            # Cloud Run用コンテナ設定
 └── package.json
 ```
 
@@ -64,14 +64,14 @@ Cloudflare Workers上で動作し、LINE BotのWebhookを受け取り、Gemini A
 
 ### 2. リマインド通知フロー (Cron)
 ```
-Cloudflare Workers Cron (毎日 12:00 JST)
+Google Cloud Scheduler Cron (毎日 12:00 JST) -> /api/cron
   └→ 3日後のカレンダー予定を検索
        └→ 該当するユーザーへLINEメッセージ（事前リマインド）を送信 👈 Phase 5
 ```
 
 ## 🔑 必要な環境変数
 
-`.dev.vars`（ローカル）または Cloudflare Workers の Secret に設定します。
+`.env`（ローカル）または Google Cloud Run の環境変数に設定します。
 
 | 変数名 | 説明 |
 | :--- | :--- |
@@ -94,9 +94,8 @@ Cloudflare Workers Cron (毎日 12:00 JST)
 | コマンド | 説明 |
 | :--- | :--- |
 | `npm install` | 依存パッケージのインストール |
-| `npm run dev` | ローカル開発サーバー起動（Wrangler） |
-| `npm run deploy` | Cloudflare Workersへデプロイ |
-| `npm run cf-typegen` | Cloudflare Bindings の型定義を生成 |
+| `npm run dev` | ローカル開発サーバー起動 (`tsx watch`) |
+| `gcloud run deploy` | Google Cloud Runへデプロイ |
 
 ## 📐 設計メモ
 
@@ -106,7 +105,7 @@ Cloudflare Workers Cron (毎日 12:00 JST)
 - **Rescue機能**: キーワードフィルタで除外された予定を `parsing_logs` テーブルに保存し、後から登録可能
 - **複数人（兄弟）対応**: `child_settings` JSONによって、特定のキーワードにマッチした予定を専用のGoogleカレンダーに自動で振り分け
 - **ナレッジ化 (Restore機能)**: 過去のプリントを `school_prints` に保存し、カレンダー登録時に去年の同じ行事をレコメンド。閲覧には「チケット」を消費する仕組み。
-- **事前リマインド**: `wrangler.jsonc` の Cron Trigger を使用し、行事の3日前に自動でLINE通知を送信
+- **事前リマインド**: Google Cloud Schedulerを使用し `/api/cron` を定期実行。行事の3日前に自動でLINE通知を送信
 - **トークンリフレッシュ**: アクセストークンの有効期限を確認し、期限切れなら自動リフレッシュ
 - **二重処理防止**: `processed_messages` テーブルへのupsertで解析の冪等性を担保
 

@@ -44,7 +44,7 @@ function createRegisteredListBubble(events: any[]): FlexBubble {
     })
     
     // そのカレンダーに属するイベントリスト
-    evs.forEach((ev: any) => {
+    ;(evs as any[]).forEach((ev: any) => {
       bodyContents.push({
         type: 'box',
         layout: 'baseline',
@@ -109,7 +109,7 @@ function createRegisteredListBubble(events: any[]): FlexBubble {
           action: {
             type: 'uri',
             label: 'Googleカレンダーを開く',
-            uri: 'https://calendar.google.com/calendar/'
+            uri: 'https://calendar.google.com/calendar/r?openExternalBrowser=1'
           }
         }
       ]
@@ -490,7 +490,7 @@ export function createPastRecordBubble(eventName: string, printId: string): Flex
 }
 
 // 8. 【新設】復元された過去プリント表示用バブル
-export function createRestoredPrintBubble(eventName: string, text: string, imageUrl: string | null): FlexBubble {
+export function createRestoredPrintBubble(eventName: string, text: string, imageUrl: string | null, remainingTickets: number | null = null): FlexBubble {
   const contents: FlexComponent[] = [
     {
       type: 'text',
@@ -541,6 +541,76 @@ export function createRestoredPrintBubble(eventName: string, text: string, image
       type: 'box',
       layout: 'vertical',
       contents: contents
+    },
+    footer: remainingTickets !== null ? {
+      type: 'box',
+      layout: 'vertical',
+      contents: [
+        {
+          type: 'text',
+          text: `🎟️ 残りお試しチケット: ${remainingTickets}枚`,
+          size: 'xs',
+          color: '#aaaaaa',
+          align: 'center'
+        }
+      ]
+    } : undefined
+  }
+}
+
+// 9. 【新設】チケット不足時のプレミアム案内バブル
+export function createNoTicketBubble(premiumUrl: string): FlexBubble {
+  return {
+    type: 'bubble',
+    size: 'kilo',
+    header: {
+      type: 'box',
+      layout: 'vertical',
+      contents: [
+        { type: 'text', text: '🎟️ チケットが足りません', weight: 'bold', color: '#ffffff', size: 'md' }
+      ],
+      backgroundColor: '#e74c3c', // Red for error/attention
+      paddingAll: 'md'
+    },
+    body: {
+      type: 'box',
+      layout: 'vertical',
+      contents: [
+        {
+          type: 'text',
+          text: '過去のプリント（ナレッジ）を復元するためのお試しチケットを使い切りました。',
+          wrap: true,
+          size: 'sm',
+          color: '#333333',
+          margin: 'sm'
+        },
+        {
+          type: 'text',
+          text: 'プレミアムプラン（月額480円）に登録すると、過去のプリントが無制限に見放題になります！',
+          wrap: true,
+          size: 'sm',
+          weight: 'bold',
+          color: '#e74c3c',
+          margin: 'md'
+        }
+      ]
+    },
+    footer: {
+      type: 'box',
+      layout: 'vertical',
+      contents: [
+        {
+          type: 'button',
+          style: 'primary',
+          height: 'sm',
+          color: '#e74c3c',
+          action: {
+            type: 'uri',
+            label: 'プレミアムプラン詳細',
+            uri: premiumUrl
+          }
+        }
+      ]
     }
   }
 }
