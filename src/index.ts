@@ -1177,7 +1177,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
              } else if (e.message?.includes('Refresh Failed')) {
                errorMessage = 'Googleカレンダーの連携期限が切れています。プリカレ設定メニューから再度「連携スタート」をお願いします🙏'
              } else if (e.message === 'Timeout') {
-               errorMessage = 'ごめんなさい💦 画像が複雑すぎるかサーバーが混み合っており、LINEの応答制限時間（30秒）を超過してしまいました。お手数ですが、プリントの全体ではなく半分ずつ撮影するなど、小分けにして送ってみてください🙏'
+               errorMessage = 'ごめんなさい💦 画像が複雑すぎるかサーバーが混み合っており、解析に時間がかかりすぎてしまいました。お手数ですが、プリントの全体ではなく半分ずつ撮影するなど、小分けにして送ってみてください🙏'
              }
 
              try {
