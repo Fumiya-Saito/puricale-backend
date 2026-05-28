@@ -1,3 +1,5 @@
+import { config } from 'dotenv'
+config()
 import { Hono } from 'hono'
 import { getCookie, setCookie } from 'hono/cookie'
 import { csrf } from 'hono/csrf'
@@ -34,6 +36,8 @@ type GoogleTokenResponse = {
   error?: string
   error_description?: string
 }
+
+const ENV = process.env as unknown as Bindings
 
 const app = new Hono<{ Bindings: Bindings }>()
 
