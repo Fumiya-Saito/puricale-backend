@@ -246,7 +246,7 @@ app.get('/auth/landing', async (c) => {
   const userId = c.req.query('userId')
   if (!userId) return c.text('Error', 400)
   const payload = { sub: userId, exp: Math.floor(Date.now() / 1000) + 600 }
-  const stateToken = await sign(payload, c.env.JWT_SECRET, 'HS256')
+  const stateToken = await sign(payload, ENV.JWT_SECRET, 'HS256')
   const url = new URL(c.req.url)
   const authUrl = `${url.origin}/auth?state=${stateToken}`
   return c.html(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css"><style>body{padding:2rem;text-align:center;}</style></head><body><main class="container"><h2>Google連携</h2><a href="${authUrl}" role="button">連携スタート 🚀</a></main></body></html>`)
@@ -257,8 +257,8 @@ app.get('/auth', (c) => {
   const state = c.req.query('state')
   if (!state) return c.text('Error', 400)
   const params = new URLSearchParams({
-    client_id: c.env.GOOGLE_CLIENT_ID,
-    redirect_uri: c.env.GOOGLE_REDIRECT_URI,
+    client_id: ENV.GOOGLE_CLIENT_ID,
+    redirect_uri: ENV.GOOGLE_REDIRECT_URI,
     response_type: 'code',
     scope: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly',
     access_type: 'offline',
@@ -276,7 +276,7 @@ app.get('/auth/callback', async (c) => {
 
   let userId
   try {
-    const payload = await verify(state, c.env.JWT_SECRET, 'HS256')
+    const payload = await verify(state, ENV.JWT_SECRET, 'HS256')
     userId = payload.sub as string
   } catch (e) { return c.text('Session Expired', 403) }
 
@@ -287,9 +287,9 @@ app.get('/auth/callback', async (c) => {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         code,
-        client_id: c.env.GOOGLE_CLIENT_ID,
-        client_secret: c.env.GOOGLE_CLIENT_SECRET,
-        redirect_uri: c.env.GOOGLE_REDIRECT_URI,
+        client_id: ENV.GOOGLE_CLIENT_ID,
+        client_secret: ENV.GOOGLE_CLIENT_SECRET,
+        redirect_uri: ENV.GOOGLE_REDIRECT_URI,
         grant_type: 'authorization_code',
       }),
     })
@@ -298,7 +298,7 @@ app.get('/auth/callback', async (c) => {
   const tokens = await tokenRes.json() as GoogleTokenResponse
   if (tokens.error) return c.text('Auth Error', 400)
 
-  const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
+  const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY)
   const { data: existing } = await supabase.from('google_auth').select('refresh_token').eq('user_id', userId).single()
   const refreshToken = tokens.refresh_token ?? existing?.refresh_token
 
@@ -319,7 +319,7 @@ app.get('/auth/callback', async (c) => {
 // 1. LIFF エントリーポイント (フロントエンド)
 // src/index.ts の app.get('/liff/entry') を書き換え
 app.get('/liff/entry', (c) => {
-  const liffId = c.env.LINE_LIFF_ID
+  const liffId = ENV.LINE_LIFF_ID
   return c.html(`
     <!DOCTYPE html>
     <html>
@@ -407,7 +407,7 @@ app.post('/settings/login-liff', async (c) => {
   // LINE公式APIで IDトークン を検証
   const params = new URLSearchParams()
   params.append('id_token', idToken)
-  params.append('client_id', c.env.LINE_CHANNEL_ID)
+  params.append('client_id', ENV.LINE_CHANNEL_ID)
 
   const verifyRes = await fetch('https://api.line.me/oauth2/v2.1/verify', {
     method: 'POST',
@@ -425,9 +425,9 @@ app.post('/settings/login-liff', async (c) => {
 
   // 自社セッション(Cookie)を発行
   const payload = { sub: userId, exp: Math.floor(Date.now() / 1000) + 3600 }
-  const sessionToken = await sign(payload, c.env.JWT_SECRET, 'HS256')
+  const sessionToken = await sign(payload, ENV.JWT_SECRET, 'HS256')
   
-  const isSecure = c.env.ENVIRONMENT !== 'local'
+  const isSecure = ENV.ENVIRONMENT !== 'local'
   setCookie(c, 'auth_token', sessionToken, { 
     httpOnly: true, 
     secure: isSecure, 
@@ -449,11 +449,11 @@ app.get('/settings', async (c) => {
 
   let userId
   try {
-    const payload = await verify(token, c.env.JWT_SECRET, 'HS256')
+    const payload = await verify(token, ENV.JWT_SECRET, 'HS256')
     userId = payload.sub as string
   } catch (e) { return c.text('Invalid Session', 403) }
 
-  const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
+  const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY)
   
   // ユーザー設定（キーワード + カレンダーID + 子供設定）を取得
   const { data: userData } = await supabase.from('users').select('keywords, calendar_id, child_settings').eq('line_user_id', userId).single()
@@ -661,7 +661,7 @@ app.post('/settings/update_calendar', async (c) => {
   
   let userId
   try {
-    const payload = await verify(token, c.env.JWT_SECRET, 'HS256')
+    const payload = await verify(token, ENV.JWT_SECRET, 'HS256')
     userId = payload.sub as string
   } catch (e) { return c.text('Invalid Session', 403) }
 
@@ -669,7 +669,7 @@ app.post('/settings/update_calendar', async (c) => {
   const calendarId = body['calendar_id'] as string
 
   if (calendarId) {
-    const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
+    const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY)
     await supabase.from('users').update({ calendar_id: calendarId }).eq('line_user_id', userId)
   }
   return c.redirect('/settings')
@@ -682,7 +682,7 @@ app.post('/settings/add_child', async (c) => {
   
   let userId
   try {
-    const payload = await verify(token, c.env.JWT_SECRET, 'HS256')
+    const payload = await verify(token, ENV.JWT_SECRET, 'HS256')
     userId = payload.sub as string
   } catch (e) { return c.text('Invalid Session', 403) }
 
@@ -700,7 +700,7 @@ app.post('/settings/add_child', async (c) => {
       keywords
     }
     
-    const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
+    const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY)
     const { data } = await supabase.from('users').select('child_settings').eq('line_user_id', userId).single()
     const currentSettings = data?.child_settings || []
     currentSettings.push(newChild)
@@ -717,7 +717,7 @@ app.post('/settings/delete_child', async (c) => {
   
   let userId
   try {
-    const payload = await verify(token, c.env.JWT_SECRET, 'HS256')
+    const payload = await verify(token, ENV.JWT_SECRET, 'HS256')
     userId = payload.sub as string
   } catch (e) { return c.text('Invalid Session', 403) }
 
@@ -725,7 +725,7 @@ app.post('/settings/delete_child', async (c) => {
   const childId = body['child_id'] as string
 
   if (childId) {
-    const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
+    const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY)
     const { data } = await supabase.from('users').select('child_settings').eq('line_user_id', userId).single()
     const currentSettings = data?.child_settings || []
     const updatedSettings = currentSettings.filter((child: any) => child.id !== childId)
@@ -742,11 +742,11 @@ app.get('/export/data', async (c) => {
 
   let userId
   try {
-    const payload = await verify(token, c.env.JWT_SECRET, 'HS256')
+    const payload = await verify(token, ENV.JWT_SECRET, 'HS256')
     userId = payload.sub as string
   } catch (e) { return c.text('Invalid Session', 403) }
 
-  const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_KEY)
+  const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY)
 
   // ユーザー設定 & 登録イベントを並列取得
   const [{ data: userData }, { data: events }] = await Promise.all([
@@ -792,15 +792,15 @@ app.post('/webhook', async (c) => {
   const signature = c.req.header('x-line-signature')
   const rawBody = await c.req.text()
   
-  if (!signature || !c.env.LINE_CHANNEL_SECRET) return c.text('Unauthorized', 401)
+  if (!signature || !ENV.LINE_CHANNEL_SECRET) return c.text('Unauthorized', 401)
   
-  const isValid = await verifyLineSignature(rawBody, signature, c.env.LINE_CHANNEL_SECRET)
+  const isValid = await verifyLineSignature(rawBody, signature, ENV.LINE_CHANNEL_SECRET)
   if (!isValid) return c.text('Unauthorized', 401)
 
   const body = JSON.parse(rawBody)
   // ログ出力のためにcatchを追加
   c.executionCtx.waitUntil(
-      handleEvents(body.events, c.env, c.req.url)
+      handleEvents(body.events, ENV, c.req.url)
         .catch(err => console.error('🚨 Global Error in handleEvents:', err))
   )
   return c.json({ message: 'ok' })
