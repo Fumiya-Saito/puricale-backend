@@ -159,7 +159,7 @@ function normalizeTags(rawTags: string[]): string[] {
 
 // --- Stripe Integration ---
 app.post('/api/create-checkout-session', async (c) => {
-  const stripe = new Stripe(ENV.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' });
+  const stripe = new Stripe(ENV.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' as any });
   const body = await c.req.json();
   const userId = body.userId;
   const requestedPrice = body.priceId;
@@ -170,33 +170,37 @@ app.post('/api/create-checkout-session', async (c) => {
   if (!userId || !actualPriceId) {
     return c.json({ error: 'Missing userId or valid priceId' }, 400);
   }
+  try {
+    // Get or Create Customer (Simplified for MVP, ideally look up from users table first)
+    const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY);
+    const { data: user } = await supabase.from('users').select('stripe_customer_id').eq('line_user_id', userId).single();
+    
+    let customerId = user?.stripe_customer_id;
+    if (!customerId) {
+      const customer = await stripe.customers.create({ metadata: { line_user_id: userId } });
+      customerId = customer.id;
+      await supabase.from('users').update({ stripe_customer_id: customerId }).eq('line_user_id', userId);
+    }
 
-  // Get or Create Customer (Simplified for MVP, ideally look up from users table first)
-  const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY);
-  const { data: user } = await supabase.from('users').select('stripe_customer_id').eq('line_user_id', userId).single();
-  
-  let customerId = user?.stripe_customer_id;
-  if (!customerId) {
-    const customer = await stripe.customers.create({ metadata: { line_user_id: userId } });
-    customerId = customer.id;
-    await supabase.from('users').update({ stripe_customer_id: customerId }).eq('line_user_id', userId);
+    const session = await stripe.checkout.sessions.create({
+      customer: customerId,
+      payment_method_types: ['card'],
+      line_items: [{ price: actualPriceId, quantity: 1 }],
+      mode: isSubscription ? 'subscription' : 'payment',
+      success_url: `https://liff.line.me/${ENV.LINE_LIFF_ID_PREMIUM}/premium?success=true`,
+      cancel_url: `https://liff.line.me/${ENV.LINE_LIFF_ID_PREMIUM}/premium?canceled=true`,
+      metadata: { line_user_id: userId, isSubscription: isSubscription ? 'true' : 'false' }
+    });
+
+    return c.json({ url: session.url });
+  } catch (err: any) {
+    console.error('Stripe Checkout Error:', err);
+    return c.json({ error: err.message }, 500);
   }
-
-  const session = await stripe.checkout.sessions.create({
-    customer: customerId,
-    payment_method_types: ['card'],
-    line_items: [{ price: actualPriceId, quantity: 1 }],
-    mode: isSubscription ? 'subscription' : 'payment',
-    success_url: `https://liff.line.me/${ENV.LINE_LIFF_ID_PREMIUM}/premium?success=true`,
-    cancel_url: `https://liff.line.me/${ENV.LINE_LIFF_ID_PREMIUM}/premium?canceled=true`,
-    metadata: { line_user_id: userId, isSubscription: isSubscription ? 'true' : 'false' }
-  });
-
-  return c.json({ url: session.url });
 });
 
 app.post('/api/stripe-webhook', async (c) => {
-  const stripe = new Stripe(ENV.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' });
+  const stripe = new Stripe(ENV.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' as any });
   const sig = c.req.header('stripe-signature');
   const body = await c.req.text();
 
