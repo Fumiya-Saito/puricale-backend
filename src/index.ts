@@ -2,6 +2,7 @@ import Stripe from 'stripe'
 import { config } from 'dotenv'
 config()
 import { Hono } from 'hono'
+import { cors } from 'hono/cors'
 import { getCookie, setCookie } from 'hono/cookie'
 import { csrf } from 'hono/csrf'
 import { createClient } from '@supabase/supabase-js'
@@ -46,6 +47,11 @@ type GoogleTokenResponse = {
 const ENV = process.env as unknown as Bindings
 
 const app = new Hono<{ Bindings: Bindings }>()
+
+app.use('*', cors({
+  origin: '*',
+  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+}))
 
 app.use('/settings/*', csrf())
 
