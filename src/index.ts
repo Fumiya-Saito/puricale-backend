@@ -838,6 +838,129 @@ app.get('/export/data', async (c) => {
   })
 })
 
+// --- MyPage API ---
+
+app.get('/api/mypage/gallery', async (c) => {
+  const token = getCookie(c, 'auth_token')
+  if (!token) return c.json({ error: 'Unauthorized' }, 401)
+  
+  let userId: string
+  try {
+    const payload = await verify(token, ENV.JWT_SECRET, 'HS256')
+    userId = payload.sub as string
+  } catch (e) { return c.json({ error: 'Invalid Session' }, 401) }
+
+  const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY)
+  
+  const { data: userData } = await supabase.from('users').select('is_premium, tickets').eq('line_user_id', userId).single()
+  const isPremium = userData?.is_premium || false
+  const tickets = userData?.tickets ?? 0
+
+  const { data: prints } = await supabase
+    .from('school_prints')
+    .select('id, message_id, image_path, full_ocr_text, canonical_tags, event_date, is_restored, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+
+  const { data: events } = await supabase
+    .from('calendar_events')
+    .select('id, source_message_id, summary, start_time')
+    .eq('user_id', userId)
+
+  const thirtyDaysAgo = new Date()
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+
+  const gallery = []
+  for (const print of (prints || [])) {
+    const linkedEvents = (events || []).filter(ev => ev.source_message_id === print.message_id)
+    let imageUrl = null
+    if (print.image_path) {
+      const { data: signedUrlData } = await supabase.storage.from('prints').createSignedUrl(print.image_path, 3600)
+      imageUrl = signedUrlData?.signedUrl || null
+    }
+
+    const createdAt = new Date(print.created_at)
+    const isOld = createdAt < thirtyDaysAgo
+    const isLocked = isOld && !isPremium && !print.is_restored
+
+    gallery.push({
+      id: print.id,
+      imageUrl,
+      text: print.full_ocr_text,
+      tags: print.canonical_tags,
+      eventDate: print.event_date,
+      createdAt: print.created_at,
+      isLocked,
+      isRestored: print.is_restored,
+      events: linkedEvents
+    })
+  }
+
+  return c.json({ isPremium, tickets, gallery })
+})
+
+app.post('/api/mypage/delete-print', async (c) => {
+  const token = getCookie(c, 'auth_token')
+  if (!token) return c.json({ error: 'Unauthorized' }, 401)
+  
+  let userId: string
+  try {
+    const payload = await verify(token, ENV.JWT_SECRET, 'HS256')
+    userId = payload.sub as string
+  } catch (e) { return c.json({ error: 'Invalid Session' }, 401) }
+
+  const body = await c.req.json()
+  const printId = body.printId
+  if (!printId) return c.json({ error: 'Missing printId' }, 400)
+
+  const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY)
+  
+  const { data: printData } = await supabase.from('school_prints').select('user_id, image_path').eq('id', printId).single()
+  if (!printData || printData.user_id !== userId) {
+    return c.json({ error: 'Not found or not authorized' }, 404)
+  }
+
+  await supabase.from('school_prints').delete().eq('id', printId)
+  if (printData.image_path) {
+     await supabase.storage.from('prints').remove([printData.image_path])
+  }
+
+  return c.json({ success: true })
+})
+
+app.post('/api/mypage/unlock-print', async (c) => {
+  const token = getCookie(c, 'auth_token')
+  if (!token) return c.json({ error: 'Unauthorized' }, 401)
+  
+  let userId: string
+  try {
+    const payload = await verify(token, ENV.JWT_SECRET, 'HS256')
+    userId = payload.sub as string
+  } catch (e) { return c.json({ error: 'Invalid Session' }, 401) }
+
+  const body = await c.req.json()
+  const printId = body.printId
+  if (!printId) return c.json({ error: 'Missing printId' }, 400)
+
+  const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY)
+  
+  const { data: userData } = await supabase.from('users').select('is_premium, tickets').eq('line_user_id', userId).single()
+  const isPremium = userData?.is_premium || false
+  let tickets = userData?.tickets ?? 0
+
+  if (!isPremium) {
+    if (tickets <= 0) {
+      return c.json({ error: 'Insufficient tickets', code: 'NO_TICKETS' }, 400)
+    }
+    tickets -= 1
+    await supabase.from('users').update({ tickets }).eq('line_user_id', userId)
+  }
+
+  await supabase.from('school_prints').update({ is_restored: true }).eq('id', printId).eq('user_id', userId)
+
+  return c.json({ success: true, remainingTickets: tickets })
+})
+
 
 // --- Webhook ---
 
