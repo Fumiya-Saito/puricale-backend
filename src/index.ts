@@ -79,7 +79,7 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 3): P
       const res = await fetch(url, options)
       if (res.status < 500) return res
       throw new Error(`${res.status}`)
-    } catch (err) {
+    } catch (err: any) {
       if (i === retries - 1) throw err
       await new Promise(r => setTimeout(r, 500 * Math.pow(2, i)))
     }
@@ -332,7 +332,7 @@ app.get('/auth/callback', async (c) => {
   try {
     const payload = await verify(state, ENV.JWT_SECRET, 'HS256')
     userId = payload.sub as string
-  } catch (e) { return c.text('Session Expired', 403) }
+  } catch (e: any) { return c.text('Session Expired', 403) }
 
   let tokenRes
   try {
@@ -347,7 +347,7 @@ app.get('/auth/callback', async (c) => {
         grant_type: 'authorization_code',
       }),
     })
-  } catch (e) { return c.text('Auth Failed', 500) }
+  } catch (e: any) { return c.text('Auth Failed', 500) }
   
   const tokens = await tokenRes.json() as GoogleTokenResponse
   if (tokens.error) return c.text('Auth Error', 400)
@@ -440,7 +440,7 @@ app.get('/liff/entry', (c) => {
             } else {
               document.getElementById('status').innerText = '認証に失敗しました。LINEから開き直してください。'
             }
-          } catch(e) {
+          } catch(e: any) {
             document.getElementById('status').innerText = 'エラーが発生しました: ' + e
           }
         }
@@ -505,7 +505,7 @@ app.get('/settings', async (c) => {
   try {
     const payload = await verify(token, ENV.JWT_SECRET, 'HS256')
     userId = payload.sub as string
-  } catch (e) { return c.text('Invalid Session', 403) }
+  } catch (e: any) { return c.text('Invalid Session', 403) }
 
   const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY)
   
@@ -522,7 +522,7 @@ app.get('/settings', async (c) => {
     if (authData) {
       calendars = await getWritableCalendars(authData.access_token)
     }
-  } catch(e) { console.error(e) }
+  } catch(e: any) { console.error(e) }
 
   // src/index.ts (GET /settings のHTML生成部分のみ抜粋・置換)
 
@@ -717,7 +717,7 @@ app.post('/settings/update_calendar', async (c) => {
   try {
     const payload = await verify(token, ENV.JWT_SECRET, 'HS256')
     userId = payload.sub as string
-  } catch (e) { return c.text('Invalid Session', 403) }
+  } catch (e: any) { return c.text('Invalid Session', 403) }
 
   const body = await c.req.parseBody()
   const calendarId = body['calendar_id'] as string
@@ -738,7 +738,7 @@ app.post('/settings/update_reminders', async (c) => {
   try {
     const payload = await verify(token, ENV.JWT_SECRET, 'HS256')
     userId = payload.sub as string
-  } catch (e) { return c.text('Invalid Session', 403) }
+  } catch (e: any) { return c.text('Invalid Session', 403) }
 
   const body = await c.req.parseBody()
   const keywordsRaw = body['keywords'] as string || ''
@@ -760,7 +760,7 @@ app.post('/settings/add_child', async (c) => {
   try {
     const payload = await verify(token, ENV.JWT_SECRET, 'HS256')
     userId = payload.sub as string
-  } catch (e) { return c.text('Invalid Session', 403) }
+  } catch (e: any) { return c.text('Invalid Session', 403) }
 
   const body = await c.req.parseBody()
   const name = sanitizeText(body['name'] as string, 20)
@@ -795,7 +795,7 @@ app.post('/settings/delete_child', async (c) => {
   try {
     const payload = await verify(token, ENV.JWT_SECRET, 'HS256')
     userId = payload.sub as string
-  } catch (e) { return c.text('Invalid Session', 403) }
+  } catch (e: any) { return c.text('Invalid Session', 403) }
 
   const body = await c.req.parseBody()
   const childId = body['child_id'] as string
@@ -820,7 +820,7 @@ app.get('/export/data', async (c) => {
   try {
     const payload = await verify(token, ENV.JWT_SECRET, 'HS256')
     userId = payload.sub as string
-  } catch (e) { return c.text('Invalid Session', 403) }
+  } catch (e: any) { return c.text('Invalid Session', 403) }
 
   const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY)
 
@@ -1009,6 +1009,107 @@ app.post('/api/mypage/unlock-print', async (c) => {
 })
 
 
+// --- Stripe API ---
+app.post('/api/create-checkout-session', async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const userId = body?.userId;
+  const priceId = body?.priceId;
+  const isSubscription = body?.isSubscription;
+  
+  if (!userId || !priceId) return c.json({ error: 'Missing parameters' }, 400);
+  if (!ENV.STRIPE_SECRET_KEY) return c.json({ error: 'Stripe not configured' }, 500);
+
+  const stripe = new Stripe(ENV.STRIPE_SECRET_KEY);
+  const actualPriceId = priceId === 'premium' ? ENV.STRIPE_PRICE_PREMIUM : ENV.STRIPE_PRICE_TICKET;
+  
+  if (!actualPriceId) return c.json({ error: 'Price ID not configured' }, 500);
+
+  try {
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      mode: isSubscription ? 'subscription' : 'payment',
+      line_items: [{ price: actualPriceId, quantity: 1 }],
+      client_reference_id: userId,
+      success_url: `https://liff.line.me/${ENV.LINE_LIFF_ID_PREMIUM}?liff.state=/premium?success=true`,
+      cancel_url: `https://liff.line.me/${ENV.LINE_LIFF_ID_PREMIUM}?liff.state=/premium?canceled=true`,
+    });
+    return c.json({ url: session.url });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+app.post('/api/create-portal-session', async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const userId = body?.userId;
+  if (!userId) return c.json({ error: 'Unauthorized' }, 401);
+  if (!ENV.STRIPE_SECRET_KEY) return c.json({ error: 'Stripe not configured' }, 500);
+
+  const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY);
+  const { data: userData } = await supabase.from('users').select('stripe_customer_id').eq('line_user_id', userId).single();
+  
+  if (!userData?.stripe_customer_id) return c.json({ error: 'Customer not found' }, 404);
+
+  const stripe = new Stripe(ENV.STRIPE_SECRET_KEY);
+  
+  try {
+    const session = await stripe.billingPortal.sessions.create({
+      customer: userData.stripe_customer_id,
+      return_url: `https://liff.line.me/${ENV.LINE_LIFF_ID_PREMIUM}?liff.state=/premium`,
+    });
+    return c.json({ url: session.url });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500);
+  }
+});
+
+app.post('/api/stripe-webhook', async (c) => {
+  const sig = c.req.header('stripe-signature');
+  const rawBody = await c.req.text();
+  const webhookSecret = ENV.STRIPE_WEBHOOK_SECRET;
+
+  if (!sig || !webhookSecret) return c.text('Webhook secret not configured', 400);
+
+  const stripe = new Stripe(ENV.STRIPE_SECRET_KEY);
+  let event;
+
+  try {
+    event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
+  } catch (err: any) {
+    return c.text(`Webhook Error: ${err.message}`, 400);
+  }
+
+  const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY);
+
+  try {
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object;
+      const userId = session.client_reference_id;
+      if (userId) {
+        if (session.mode === 'subscription') {
+          await supabase.from('users').update({ 
+            is_premium: true, 
+            stripe_customer_id: session.customer 
+          }).eq('line_user_id', userId);
+        } else if (session.mode === 'payment') {
+          // Ticket purchase (5 tickets)
+          const { data: userData } = await supabase.from('users').select('tickets').eq('line_user_id', userId).single();
+          const currentTickets = userData?.tickets ?? 0;
+          await supabase.from('users').update({ tickets: currentTickets + 5 }).eq('line_user_id', userId);
+        }
+      }
+    } else if (event.type === 'customer.subscription.deleted') {
+      const subscription = event.data.object;
+      const customerId = subscription.customer;
+      await supabase.from('users').update({ is_premium: false }).eq('stripe_customer_id', customerId);
+    }
+  } catch(e: any) {
+    console.error('Failed to update DB on Stripe webhook', e);
+  }
+
+  return c.json({ received: true });
+});
+
 // --- Webhook ---
 
 app.post('/webhook', async (c) => {
@@ -1160,11 +1261,11 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                allEvents = parsed.events || []
                rawText = parsed.raw_text || ''
                parsedTitle = parsed.title || null
-             } catch (e) {
+             } catch (e: any) {
                console.error('Parse Error:', e)
                try {
                  await client.replyMessage({ replyToken: event.replyToken, messages: [{ type: 'text', text: '読み取れませんでした💦' }] })
-               } catch (err) {
+               } catch (err: any) {
                  await client.pushMessage({ to: userId, messages: [{ type: 'text', text: '読み取れませんでした💦' }] })
                }
                continue
@@ -1331,7 +1432,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                  canonical_tags: Array.from(allTags),
                  event_date: eventDate
                })
-             } catch (e) {
+             } catch (e: any) {
                console.error('Failed to save school_prints:', e)
                // ナレッジ保存に失敗しても本処理は止めない
              }
@@ -1384,7 +1485,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                     })
                   }
                 }
-                          } catch (e) {
+                          } catch (e: any) {
                 console.error('Past record search error:', e)
              }
 
@@ -1704,7 +1805,7 @@ ${contextText}`;
                replyToken: event.replyToken,
                messages: [{ type: 'text', text: answer }]
              });
-           } catch (e) {
+           } catch (e: any) {
              console.error('RAG Error:', e);
              await client.replyMessage({
                replyToken: event.replyToken,
@@ -1784,7 +1885,7 @@ async function handleScheduled(event: any, env: Bindings) {
         to: userId,
         messages: messages as any
       })
-    } catch (e) {
+    } catch (e: any) {
       console.error(`Failed to send reminder to ${userId}:`, e)
     }
   }
