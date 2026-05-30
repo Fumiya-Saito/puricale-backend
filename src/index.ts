@@ -67,6 +67,7 @@ const EventSchema = z.object({
 })
 const ResponseSchema = z.object({
   raw_text: z.string().optional(),
+  title: z.string().optional(),
   events: z.array(EventSchema)
 })
 
@@ -853,7 +854,7 @@ app.post('/api/mypage/gallery', async (c) => {
 
   const { data: prints } = await supabase
     .from('school_prints')
-    .select('id, message_id, image_path, full_ocr_text, canonical_tags, event_date, is_restored, created_at')
+    .select('id, message_id, title, image_path, full_ocr_text, canonical_tags, event_date, is_restored, created_at')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
 
@@ -880,6 +881,7 @@ app.post('/api/mypage/gallery', async (c) => {
 
     gallery.push({
       id: print.id,
+      title: print.title,
       imageUrl,
       text: print.full_ocr_text,
       tags: print.canonical_tags,
@@ -893,6 +895,32 @@ app.post('/api/mypage/gallery', async (c) => {
 
   return c.json({ isPremium, tickets, gallery })
 })
+
+app.post('/api/mypage/update-title', async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const { userId, printId, title } = body || {};
+  if (!userId || !printId || typeof title !== 'string') return c.json({ error: 'Missing parameters' }, 400);
+
+  const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY);
+  
+  const { data: userData } = await supabase.from('users').select('is_premium').eq('line_user_id', userId).single();
+  const isPremium = userData?.is_premium || false;
+  
+  const { data: print } = await supabase.from('school_prints').select('created_at, is_restored').eq('id', printId).eq('user_id', userId).single();
+  if (!print) return c.json({ error: 'Print not found' }, 404);
+  
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const isOld = new Date(print.created_at) < thirtyDaysAgo;
+  const isLocked = isOld && !isPremium && !print.is_restored;
+  
+  if (isLocked) return c.json({ error: 'This print is locked.' }, 403);
+  
+  const { error } = await supabase.from('school_prints').update({ title: title.slice(0, 30) }).eq('id', printId).eq('user_id', userId);
+  if (error) return c.json({ error: error.message }, 500);
+  
+  return c.json({ success: true });
+});
 
 app.post('/api/mypage/delete-print', async (c) => {
   const body = await c.req.json().catch(() => null);
@@ -1050,6 +1078,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                type: SchemaType.OBJECT,
                properties: {
                  raw_text: { type: SchemaType.STRING, description: "プリントの全文OCR結果" },
+                 title: { type: SchemaType.STRING, description: "プリントのタイトル（例：『5月の園だより』『運動会のお知らせ』など）。15文字以内で簡潔に作成せよ" },
                  events: {
                    type: SchemaType.ARRAY,
                    items: {
@@ -1086,6 +1115,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
 
              let allEvents: any[] = []
              let rawText = ''
+             let parsedTitle: string | null = null
              try {
                const result = await generateContentWithRetry(model, promptParts)
                const jsonText = result.response.text()
@@ -1093,6 +1123,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                const parsed = ResponseSchema.parse(json)
                allEvents = parsed.events || []
                rawText = parsed.raw_text || ''
+               parsedTitle = parsed.title || null
              } catch (e) {
                console.error('Parse Error:', e)
                try {
@@ -1260,6 +1291,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                  message_id: targetMsgId,
                  image_path: imagePath,
                  full_ocr_text: rawText,
+                 title: parsedTitle,
                  canonical_tags: Array.from(allTags),
                  event_date: eventDate
                })
@@ -1314,9 +1346,15 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                     })
                   }
                 }
-             } catch (e) {
+                          } catch (e) {
                 console.error('Past record search error:', e)
              }
+
+             // 📝 マイページへのリンクを末尾に追加
+             replyMessages.push({
+               type: 'text',
+               text: `📝 登録されたプリントはマイページから確認・編集できます👇\nhttps://liff.line.me/${env.LINE_LIFF_ID}`
+             })
 
              await client.replyMessage({
                 replyToken: event.replyToken,
