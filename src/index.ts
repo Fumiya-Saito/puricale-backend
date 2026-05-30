@@ -1308,7 +1308,8 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                continue
              }
 
-             const replyMessages: any[] = generateFlexMessages(registeredEvents, ignoredEvents, targetMsgId)
+             const liffUrl = `https://liff.line.me/${env.LINE_LIFF_ID}`
+             const replyMessages: any[] = generateFlexMessages(registeredEvents, ignoredEvents, targetMsgId, liffUrl)
 
              // ★ 過去データの検索 (Event-Trigger Notification)
              try {
@@ -1350,11 +1351,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                 console.error('Past record search error:', e)
              }
 
-             // 📝 マイページへのリンクを末尾に追加
-             replyMessages.push({
-               type: 'text',
-               text: `📝 登録されたプリントはマイページから確認・編集できます👇\nhttps://liff.line.me/${env.LINE_LIFF_ID}`
-             })
+
 
              await client.replyMessage({
                 replyToken: event.replyToken,
@@ -1500,7 +1497,8 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
           await supabase.from('parsing_logs').delete().eq('message_id', targetMsgId)
         }
 
-        const rescueMessages = generateFlexMessages(rescued, [], targetMsgId)
+        const liffUrl = `https://liff.line.me/${env.LINE_LIFF_ID}`
+        const rescueMessages = generateFlexMessages(rescued, [], targetMsgId, liffUrl)
         await client.replyMessage({ 
           replyToken: event.replyToken, 
           // 念のため as any

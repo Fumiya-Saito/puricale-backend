@@ -118,7 +118,7 @@ function createRegisteredListBubble(events: any[]): FlexBubble {
 }
 
 // 2. 結果まとめ用カード (除外レポート)
-function createSummaryBubble(successCount: number, ignoredEvents: any[], messageId: string): FlexBubble {
+function createSummaryBubble(successCount: number, ignoredEvents: any[], messageId: string, liffUrl: string): FlexBubble {
   // 除外リストも多めに表示 (最大10件)
   const MAX_DISPLAY = 10
   
@@ -158,9 +158,21 @@ function createSummaryBubble(successCount: number, ignoredEvents: any[], message
   const footerContents: FlexComponent[] = [
     {
       type: 'button',
+      style: 'primary',
+      height: 'sm',
+      color: '#0367D3',
+      action: {
+        type: 'uri',
+        label: '📝 マイページを開く',
+        uri: liffUrl
+      }
+    },
+    {
+      type: 'button',
       style: 'secondary',
       color: '#ff3333',
       height: 'sm',
+      margin: 'sm',
       action: {
         type: 'postback',
         label: '取り消す',
@@ -210,7 +222,7 @@ function createSummaryBubble(successCount: number, ignoredEvents: any[], message
 }
 
 // 3. メイン生成関数
-export function generateFlexMessages(keptEvents: any[], ignoredEvents: any[], messageId: string): Message[] {
+export function generateFlexMessages(keptEvents: any[], ignoredEvents: any[], messageId: string, liffUrl: string): Message[] {
   const messages: Message[] = []
 
   // 1通目: 登録リスト (Bubble)
@@ -226,7 +238,7 @@ export function generateFlexMessages(keptEvents: any[], ignoredEvents: any[], me
   // 2通目: 完了レポート (Bubble)
   // イベントが0件でも、除外があればレポートは出す
   if (keptEvents.length > 0 || ignoredEvents.length > 0) {
-    const summaryBubble = createSummaryBubble(keptEvents.length, ignoredEvents, messageId)
+    const summaryBubble = createSummaryBubble(keptEvents.length, ignoredEvents, messageId, liffUrl)
     messages.push({
       type: 'flex',
       altText: '📊 完了レポート',
