@@ -1197,8 +1197,8 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                      summary: sanitizeText(ev.summary, 100),
                      location: sanitizeText(ev.location, 100),
                      description: sanitizeText(ev.description, 1000),
-                     start: ev.start.includes('T') ? { dateTime: ev.start, timeZone: 'Asia/Tokyo' } : { date: ev.start },
-                     end: ev.end ? (ev.end.includes('T') ? { dateTime: ev.end, timeZone: 'Asia/Tokyo' } : { date: ev.end }) : (ev.start.includes('T') ? { dateTime: ev.start, timeZone: 'Asia/Tokyo' } : { date: ev.start })
+                     start: { dateTime: ev.start, timeZone: 'Asia/Tokyo' },
+                     end: { dateTime: ev.end || ev.start, timeZone: 'Asia/Tokyo' }
                    })
                })
                const data = await res.json() as any
