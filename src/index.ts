@@ -21,7 +21,6 @@ type Bindings = {
   SUPABASE_KEY: string
   LINE_CHANNEL_SECRET: string
   LINE_CHANNEL_ACCESS_TOKEN: string
-  ALLOWED_USERS: string
   JWT_SECRET: string
   ENVIRONMENT?: string
   LINE_LIFF_ID: string
@@ -1132,7 +1131,6 @@ app.post('/webhook', async (c) => {
 async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: string) {
   const client = new messagingApi.MessagingApiClient({ channelAccessToken: env.LINE_CHANNEL_ACCESS_TOKEN })
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_KEY)
-  const allowedUsers = env.ALLOWED_USERS ? env.ALLOWED_USERS.split(',') : []
   const MODEL_NAME = 'gemini-2.5-flash'
   const baseUrl = new URL(reqUrl).origin
   
