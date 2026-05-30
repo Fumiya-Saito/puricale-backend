@@ -1092,7 +1092,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                type: SchemaType.OBJECT,
                properties: {
                  raw_text: { type: SchemaType.STRING, description: "プリントの全文OCR結果" },
-                 title: { type: SchemaType.STRING, description: "プリントのタイトル。画像から発行元（学校名・園名・施設名など）が読み取れる場合は必ず先頭に含め、30文字以内で分かりやすく作成せよ（例：『〇〇幼稚園 5月の園だより』『△△小学校 運動会のお知らせ』など）" },
+                 title: { type: SchemaType.STRING, description: "プリントのタイトル。画像から発行元（学校名など）が正確に読み取れる場合は先頭に含め、30文字以内で作成せよ。固有名詞が不明な場合は『〇〇幼稚園』のようなプレースホルダー（仮称）は絶対にそのまま出力せず、単に『保育園』『小学校』とするか発行元を省略すること。" },
                  events: {
                    type: SchemaType.ARRAY,
                    items: {
