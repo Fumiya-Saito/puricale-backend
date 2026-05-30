@@ -840,15 +840,10 @@ app.get('/export/data', async (c) => {
 
 // --- MyPage API ---
 
-app.get('/api/mypage/gallery', async (c) => {
-  const token = getCookie(c, 'auth_token')
-  if (!token) return c.json({ error: 'Unauthorized' }, 401)
-  
-  let userId: string
-  try {
-    const payload = await verify(token, ENV.JWT_SECRET, 'HS256')
-    userId = payload.sub as string
-  } catch (e) { return c.json({ error: 'Invalid Session' }, 401) }
+app.post('/api/mypage/gallery', async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const userId = body?.userId;
+  if (!userId) return c.json({ error: 'Unauthorized' }, 401);
 
   const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY)
   
@@ -900,14 +895,9 @@ app.get('/api/mypage/gallery', async (c) => {
 })
 
 app.post('/api/mypage/delete-print', async (c) => {
-  const token = getCookie(c, 'auth_token')
-  if (!token) return c.json({ error: 'Unauthorized' }, 401)
-  
-  let userId: string
-  try {
-    const payload = await verify(token, ENV.JWT_SECRET, 'HS256')
-    userId = payload.sub as string
-  } catch (e) { return c.json({ error: 'Invalid Session' }, 401) }
+  const body = await c.req.json().catch(() => null);
+  const userId = body?.userId;
+  if (!userId) return c.json({ error: 'Unauthorized' }, 401);
 
   const body = await c.req.json()
   const printId = body.printId
@@ -929,14 +919,9 @@ app.post('/api/mypage/delete-print', async (c) => {
 })
 
 app.post('/api/mypage/unlock-print', async (c) => {
-  const token = getCookie(c, 'auth_token')
-  if (!token) return c.json({ error: 'Unauthorized' }, 401)
-  
-  let userId: string
-  try {
-    const payload = await verify(token, ENV.JWT_SECRET, 'HS256')
-    userId = payload.sub as string
-  } catch (e) { return c.json({ error: 'Invalid Session' }, 401) }
+  const body = await c.req.json().catch(() => null);
+  const userId = body?.userId;
+  if (!userId) return c.json({ error: 'Unauthorized' }, 401);
 
   const body = await c.req.json()
   const printId = body.printId
