@@ -844,6 +844,10 @@ app.get('/export/data', async (c) => {
 app.post('/api/mypage/gallery', async (c) => {
   const body = await c.req.json().catch(() => null);
   const userId = body?.userId;
+  const page = parseInt(body?.page) || 1;
+  const limit = parseInt(body?.limit) || 12;
+  const keyword = body?.keyword || '';
+
   if (!userId) return c.json({ error: 'Unauthorized' }, 401);
 
   const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY)
@@ -852,11 +856,21 @@ app.post('/api/mypage/gallery', async (c) => {
   const isPremium = userData?.is_premium || false
   const tickets = userData?.tickets ?? 0
 
-  const { data: prints } = await supabase
+  let query = supabase
     .from('school_prints')
-    .select('id, message_id, title, image_path, full_ocr_text, canonical_tags, event_date, is_restored, created_at')
+    .select('id, message_id, title, image_path, full_ocr_text, canonical_tags, event_date, is_restored, created_at', { count: 'exact' })
     .eq('user_id', userId)
-    .order('created_at', { ascending: false })
+    .order('created_at', { ascending: false });
+
+  if (keyword) {
+    query = query.or(`title.ilike.%${keyword}%,full_ocr_text.ilike.%${keyword}%`);
+  }
+
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
+  query = query.range(from, to);
+
+  const { data: prints, count } = await query;
 
   const { data: events } = await supabase
     .from('calendar_events')
