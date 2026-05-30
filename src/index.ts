@@ -164,6 +164,45 @@ function normalizeTags(rawTags: string[]): string[] {
 
 
 // --- Stripe Integration ---
+app.post('/api/user-status', async (c) => {
+  const body = await c.req.json();
+  const userId = body.userId;
+  if (!userId) return c.json({ error: 'Missing userId' }, 400);
+  
+  const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY);
+  const { data: user } = await supabase.from('users').select('is_premium, stripe_customer_id').eq('line_user_id', userId).single();
+  
+  return c.json({
+    isPremium: user?.is_premium || false,
+    customerId: user?.stripe_customer_id || null
+  });
+});
+
+app.post('/api/create-portal-session', async (c) => {
+  const stripe = new Stripe(ENV.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' as any });
+  const body = await c.req.json();
+  const userId = body.userId;
+  if (!userId) return c.json({ error: 'Missing userId' }, 400);
+
+  const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY);
+  const { data: user } = await supabase.from('users').select('stripe_customer_id').eq('line_user_id', userId).single();
+  
+  if (!user?.stripe_customer_id) {
+    return c.json({ error: 'Customer not found' }, 404);
+  }
+
+  try {
+    const session = await stripe.billingPortal.sessions.create({
+      customer: user.stripe_customer_id,
+      return_url: `https://liff.line.me/${ENV.LINE_LIFF_ID_PREMIUM}/premium`,
+    });
+    return c.json({ url: session.url });
+  } catch (err: any) {
+    console.error('Stripe Portal Error:', err);
+    return c.json({ error: err.message }, 500);
+  }
+});
+
 app.post('/api/create-checkout-session', async (c) => {
   const stripe = new Stripe(ENV.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' as any });
   const body = await c.req.json();
@@ -177,10 +216,13 @@ app.post('/api/create-checkout-session', async (c) => {
     return c.json({ error: 'Missing userId or valid priceId' }, 400);
   }
   try {
-    // Get or Create Customer (Simplified for MVP, ideally look up from users table first)
     const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY);
-    const { data: user } = await supabase.from('users').select('stripe_customer_id').eq('line_user_id', userId).single();
+    const { data: user } = await supabase.from('users').select('is_premium, stripe_customer_id').eq('line_user_id', userId).single();
     
+    if (isSubscription && user?.is_premium) {
+      return c.json({ error: 'ALREADY_SUBSCRIBED' }, 400);
+    }
+
     let customerId = user?.stripe_customer_id;
     if (!customerId) {
       const customer = await stripe.customers.create({ metadata: { line_user_id: userId } });
