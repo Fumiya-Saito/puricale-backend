@@ -1646,8 +1646,74 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
          })
        }
        
-       // 4. それ以外の会話は完全スルー (グループでの誤爆防止)
-       continue
+       // 4. AIチャットアシスタント (プレミアム限定)
+       // グループでの誤爆を防ぐため、個人チャットのみ反応する
+       if (event.source.type === 'user') {
+         const userId = event.source.userId;
+         if (userId) {
+           const { data: userData } = await supabase.from('users').select('is_premium').eq('line_user_id', userId).single();
+           if (!userData?.is_premium) {
+             const premiumUrl = env.LINE_LIFF_ID_PREMIUM ? `https://liff.line.me/${env.LINE_LIFF_ID_PREMIUM}/premium` : `https://liff.line.me/${env.LINE_LIFF_ID}`;
+             await client.replyMessage({
+               replyToken: event.replyToken,
+               messages: [{ 
+                 type: 'text', 
+                 text: '🤖 おしゃべりAIアシスタント機能は【プレミアムプラン限定】です✨\n過去のプリントから「次のお弁当の日は？」「明日の持ち物は？」など何でもお答えします！\n\n詳細はこちら👇\n' + premiumUrl 
+               }]
+             });
+             continue;
+           }
+
+           // プレミアムユーザー: 過去90日間のプリントを取得してRAG
+           const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+           const { data: pastPrints } = await supabase
+             .from('school_prints')
+             .select('title, event_date, full_ocr_text')
+             .eq('user_id', userId)
+             .gte('created_at', ninetyDaysAgo)
+             .order('event_date', { ascending: false });
+
+           let contextText = '【過去のプリント情報】\n';
+           if (!pastPrints || pastPrints.length === 0) {
+             contextText += '最近登録されたプリントはありません。\n';
+           } else {
+             pastPrints.forEach((p, idx) => {
+               contextText += `---\n[プリント${idx + 1}] タイトル: ${p.title}\n行事日: ${p.event_date}\n内容:\n${p.full_ocr_text}\n`;
+             });
+           }
+
+           const systemInstruction = `あなたは幼稚園・学校のプリントから情報を探すAIアシスタントです。
+以下のユーザーの過去のプリント情報を元に、ユーザーからの質問に答えてください。
+- 質問の答えがプリント情報に含まれていない場合は「プリントには記載がありませんでした」と正直に答えてください。
+- 回答はフレンドリーで親しみやすいトーン（絵文字も適度に使う）でお願いします。
+- 持ち物や時間など、重要な情報は箇条書きで見やすく整理してください。
+
+${contextText}`;
+
+           try {
+             const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
+             const model = genAI.getGenerativeModel({ 
+               model: 'gemini-2.5-flash',
+               systemInstruction: systemInstruction 
+             });
+             
+             const result = await model.generateContent(rawText);
+             const answer = result.response.text();
+             
+             await client.replyMessage({
+               replyToken: event.replyToken,
+               messages: [{ type: 'text', text: answer }]
+             });
+           } catch (e) {
+             console.error('RAG Error:', e);
+             await client.replyMessage({
+               replyToken: event.replyToken,
+               messages: [{ type: 'text', text: 'ごめんなさい💦 エラーが発生して回答できませんでした。' }]
+             });
+           }
+         }
+       }
+       continue;
     }
 
     // ---------------------------------------------------------
