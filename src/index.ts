@@ -1308,7 +1308,8 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                continue
              }
 
-             const liffUrl = `https://liff.line.me/${env.LINE_LIFF_ID}`
+             // フロントエンド（Astroアプリ）のLIFF IDを指定する
+             const liffUrl = `https://liff.line.me/2009105255-Zi7rWEZi`
              const replyMessages: any[] = generateFlexMessages(registeredEvents, ignoredEvents, targetMsgId, liffUrl)
 
              // ★ 過去データの検索 (Event-Trigger Notification)
@@ -1497,7 +1498,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
           await supabase.from('parsing_logs').delete().eq('message_id', targetMsgId)
         }
 
-        const liffUrl = `https://liff.line.me/${env.LINE_LIFF_ID}`
+        const liffUrl = `https://liff.line.me/2009105255-Zi7rWEZi`
         const rescueMessages = generateFlexMessages(rescued, [], targetMsgId, liffUrl)
         await client.replyMessage({ 
           replyToken: event.replyToken, 
