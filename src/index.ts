@@ -729,6 +729,28 @@ app.post('/settings/update_calendar', async (c) => {
   return c.redirect('/settings')
 })
 
+// Update Reminders Action
+app.post('/settings/update_reminders', async (c) => {
+  const token = getCookie(c, 'auth_token')
+  if (!token) return c.text('Session Error', 403)
+  
+  let userId
+  try {
+    const payload = await verify(token, ENV.JWT_SECRET, 'HS256')
+    userId = payload.sub as string
+  } catch (e) { return c.text('Invalid Session', 403) }
+
+  const body = await c.req.parseBody()
+  const keywordsRaw = body['keywords'] as string || ''
+  
+  const keywords = keywordsRaw.split(',').map(k => sanitizeText(k.trim(), 20)).filter(k => k)
+  
+  const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY)
+  await supabase.from('users').update({ keywords }).eq('line_user_id', userId)
+  
+  return c.redirect('/settings')
+})
+
 // Add Child Action
 app.post('/settings/add_child', async (c) => {
   const token = getCookie(c, 'auth_token')
