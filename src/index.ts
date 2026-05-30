@@ -130,21 +130,21 @@ async function getWritableCalendars(accessToken: string) {
 
 // --- タグ正規化辞書 (Canonical ID + Alias) ---
 const TAG_DICTIONARY: { id: string; aliases: string[] }[] = [
-  { id: 'EVENT_SPORTS_DAY',       aliases: ['運動会', '体育祭', 'スポーツ大会', '体育発表会'] },
-  { id: 'EVENT_FIELD_TRIP',       aliases: ['遠足', '校外学習', '社会見学', '課外学習', '自然教室'] },
-  { id: 'EVENT_PARENTS_MEETING',  aliases: ['保護者会', '懇談会', '懇親会', '父母会', 'PTA', '保護者懇談'] },
-  { id: 'EVENT_CLASS_VISIT',      aliases: ['授業参観', '参観日', '学習参観', '公開授業', '授業公開'] },
-  { id: 'EVENT_INTERVIEW',        aliases: ['個人面談', '三者面談', '教育相談', '面談', '個別面談'] },
-  { id: 'EVENT_HANDOVER_DRILL',   aliases: ['引き渡し訓練', '引渡し訓練', '緊急引渡し', '引き渡し'] },
-  { id: 'EVENT_GRADUATION',       aliases: ['卒業式', '卒園式', '修了式', '卒業'] },
-  { id: 'EVENT_ENTRANCE',         aliases: ['入学式', '入園式', '始業式', '入学'] },
-  { id: 'EVENT_SCHOOL_TRIP',      aliases: ['修学旅行', '林間学校', '宿泊学習', '宿泊行事'] },
-  { id: 'EVENT_CULTURE_FESTIVAL', aliases: ['文化祭', '学芸会', '学習発表会', '音楽会', '展覧会', '作品展'] },
-  { id: 'EVENT_SCHOOL_EXAM',      aliases: ['テスト', '試験', '定期考査', '学力調査', '実力テスト'] },
-  { id: 'EVENT_COLLECTION',       aliases: ['集金', '納金', '口座振替'] },
-  { id: 'EVENT_HEALTH_CHECK',     aliases: ['健康診断', '身体測定', '歯科検診', '眼科検診', '内科検診', '検診'] },
-  { id: 'EVENT_CLEANUP',          aliases: ['大掃除', '掃除', 'クリーン活動'] },
-  { id: 'EVENT_HOLIDAY',          aliases: ['休校', '臨時休校', '休園', '学校閉庁', '振替休日'] },
+  { id: '運動会',       aliases: ['運動会', '体育祭', 'スポーツ大会', '体育発表会'] },
+  { id: '遠足',       aliases: ['遠足', '校外学習', '社会見学', '課外学習', '自然教室'] },
+  { id: '保護者会',  aliases: ['保護者会', '懇談会', '懇親会', '父母会', 'PTA', '保護者懇談'] },
+  { id: '授業参観',      aliases: ['授業参観', '参観日', '学習参観', '公開授業', '授業公開'] },
+  { id: '個人面談',        aliases: ['個人面談', '三者面談', '教育相談', '面談', '個別面談'] },
+  { id: '引き渡し訓練',   aliases: ['引き渡し訓練', '引渡し訓練', '緊急引渡し', '引き渡し'] },
+  { id: '卒業式',       aliases: ['卒業式', '卒園式', '修了式', '卒業'] },
+  { id: '入学式',         aliases: ['入学式', '入園式', '始業式', '入学'] },
+  { id: '修学旅行',      aliases: ['修学旅行', '林間学校', '宿泊学習', '宿泊行事'] },
+  { id: '文化祭', aliases: ['文化祭', '学芸会', '学習発表会', '音楽会', '展覧会', '作品展'] },
+  { id: 'テスト',      aliases: ['テスト', '試験', '定期考査', '学力調査', '実力テスト'] },
+  { id: '集金',       aliases: ['集金', '納金', '口座振替'] },
+  { id: '健康診断',     aliases: ['健康診断', '身体測定', '歯科検診', '眼科検診', '内科検診', '検診'] },
+  { id: '大掃除',          aliases: ['大掃除', '掃除', 'クリーン活動'] },
+  { id: '休校',          aliases: ['休校', '臨時休校', '休園', '学校閉庁', '振替休日'] },
 ];
 
 function normalizeTag(rawTag: string): string {
@@ -508,9 +508,11 @@ app.get('/settings', async (c) => {
 
   const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY)
   
-  // ユーザー設定（キーワード + カレンダーID + 子供設定）を取得
-  const { data: userData } = await supabase.from('users').select('keywords, calendar_id, child_settings').eq('line_user_id', userId).single()
+  // ユーザー設定（キーワード + カレンダーID + 子供設定 + プラン状態）を取得
+  const { data: userData } = await supabase.from('users').select('keywords, calendar_id, child_settings, is_premium, tickets').eq('line_user_id', userId).single()
   const keywords: string[] = userData?.keywords || []
+  const isPremium: boolean = userData?.is_premium || false
+  const tickets: number = userData?.tickets || 0
   const currentCalendarId = userData?.calendar_id || 'primary'
   const childSettings: any[] = userData?.child_settings || []
 
@@ -609,6 +611,18 @@ app.get('/settings', async (c) => {
       <body>
         <main>
           
+          <section style="display:flex; justify-content:space-between; align-items:center; ${isPremium ? 'border: 2px solid #4ECDC4; background: linear-gradient(135deg, #f0fffd 0%, #ffffff 100%);' : ''}">
+            <div>
+              <h3 style="border:none; margin-bottom:5px; padding:0; display:flex; align-items:center; gap:8px;">
+                ${isPremium ? '<span style="font-size:1.4rem;">✨</span> <strong style="color:#00c288;">プレミアムプラン利用中</strong>' : '⭐ <strong>無料プラン</strong>'}
+              </h3>
+              ${!isPremium ? `<p style="margin:0; font-size:0.95rem; font-weight:bold; color:#e67e22;">🎫 復元チケット残数: ${tickets}枚</p>` : '<p style="margin:0; font-size:0.9rem; color:#666;">すべての機能が無制限でご利用いただけます</p>'}
+            </div>
+            <a href="https://liff.line.me/${ENV.LINE_LIFF_ID_PREMIUM}/premium" style="background:#2c3e50; color:#fff; padding:8px 16px; border-radius:8px; text-decoration:none; font-size:0.9rem; font-weight:bold; white-space:nowrap;">
+              ${isPremium ? 'プラン管理' : 'チケット追加'}
+            </a>
+          </section>
+
           <section>
             <h3>👪 家族共有カレンダー（ベース）</h3>
             <p>
