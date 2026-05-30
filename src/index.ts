@@ -893,7 +893,7 @@ app.post('/api/mypage/gallery', async (c) => {
     })
   }
 
-  return c.json({ isPremium, tickets, gallery })
+  return c.json({ isPremium, tickets, gallery, totalCount: count || 0 })
 })
 
 app.post('/api/mypage/update-title', async (c) => {
