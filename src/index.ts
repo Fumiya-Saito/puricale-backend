@@ -899,8 +899,7 @@ app.post('/api/mypage/delete-print', async (c) => {
   const userId = body?.userId;
   if (!userId) return c.json({ error: 'Unauthorized' }, 401);
 
-  const body = await c.req.json()
-  const printId = body.printId
+  const printId = body?.printId
   if (!printId) return c.json({ error: 'Missing printId' }, 400)
 
   const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY)
@@ -923,8 +922,7 @@ app.post('/api/mypage/unlock-print', async (c) => {
   const userId = body?.userId;
   if (!userId) return c.json({ error: 'Unauthorized' }, 401);
 
-  const body = await c.req.json()
-  const printId = body.printId
+  const printId = body?.printId
   if (!printId) return c.json({ error: 'Missing printId' }, 400)
 
   const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY)
