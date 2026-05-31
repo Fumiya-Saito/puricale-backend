@@ -519,9 +519,19 @@ app.get('/settings', async (c) => {
   // カレンダー一覧を取得
   let calendars: any[] = []
   try {
-    const { data: authData } = await supabase.from('google_auth').select('access_token').eq('user_id', userId).single()
+    const { data: authData } = await supabase.from('google_auth').select('*').eq('user_id', userId).single()
     if (authData) {
-      calendars = await getWritableCalendars(authData.access_token)
+      let accessToken = authData.access_token
+      if (Date.now() > (authData.expiry_date || 0)) {
+         const newTokens = await (await fetchWithRetry('https://oauth2.googleapis.com/token', {
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ client_id: ENV.GOOGLE_CLIENT_ID, client_secret: ENV.GOOGLE_CLIENT_SECRET, refresh_token: authData.refresh_token, grant_type: 'refresh_token' })
+         })).json() as GoogleTokenResponse
+         accessToken = newTokens.access_token
+         await supabase.from('google_auth').update({ access_token: accessToken, expiry_date: Date.now() + 3500 * 1000 }).eq('user_id', userId)
+      }
+      calendars = await getWritableCalendars(accessToken)
     }
   } catch(e: any) { console.error(e) }
 
