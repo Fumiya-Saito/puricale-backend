@@ -417,7 +417,7 @@ export function createHelpBubble(settingsUrl: string): any {
             { type: 'text', text: '📸 上手な使い方のコツ', weight: 'bold', size: 'sm', color: '#27ae60' },
             { type: 'text', text: '・プリント全体が写るように撮影', size: 'xs', color: '#666666', wrap: true },
             { type: 'text', text: '・明るい場所で、文字がブレないように', size: 'xs', color: '#666666', wrap: true },
-            { type: 'text', text: '・一度に1枚ずつ送信してください', size: 'xs', color: '#666666', wrap: true }
+            { type: 'text', text: '・複数枚まとめての送信もOKです！', size: 'xs', color: '#666666', wrap: true }
           ]
         },
         { type: 'separator', margin: 'lg' },
