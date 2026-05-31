@@ -92,6 +92,39 @@ function sanitizeText(text?: string | null, maxLength = 500): string {
   return cleaned.length > maxLength ? cleaned.slice(0, maxLength) + '...' : cleaned
 }
 
+// --- Rate Limit Helper ---
+async function checkAndUpdateRateLimit(userId: string, supabase: any): Promise<boolean> {
+  const { data } = await supabase.from('users')
+    .select('daily_api_usage, last_api_used_date')
+    .eq('line_user_id', userId)
+    .single();
+
+  if (!data) return true; // Default allow if user not found (shouldn't happen)
+
+  const d = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+  const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  let usage = data.daily_api_usage || 0;
+  const lastDate = data.last_api_used_date;
+
+  if (lastDate !== todayStr) {
+    usage = 0;
+  }
+
+  if (usage >= 100) {
+    return false;
+  }
+
+  await supabase.from('users')
+    .update({ 
+      daily_api_usage: usage + 1,
+      last_api_used_date: todayStr
+    })
+    .eq('line_user_id', userId);
+
+  return true;
+}
+
 async function generateContentWithRetry(model: any, promptParts: any[], maxRetries = 3) {
   for (let i = 0; i < maxRetries; i++) {
     try {
@@ -1309,6 +1342,16 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
          }
 
          try {
+             // レートリミットチェック (1日100回制限)
+             const allowed = await checkAndUpdateRateLimit(userId, supabase)
+             if (!allowed) {
+                await client.replyMessage({ 
+                    replyToken: event.replyToken, 
+                    messages: [{ type: 'text', text: '⚠️ 1日のAI利用上限（100回）に達しました。セキュリティ保護のため一時的に制限されています。明日またご利用ください。' }] 
+                })
+                continue
+             }
+
              // ユーザー情報・認証取得
              const { data: userData } = await supabase.from('users').select('keywords, calendar_id, child_settings').eq('line_user_id', userId).single()
              const { data: authData } = await supabase.from('google_auth').select('*').eq('user_id', userId).single()
@@ -1948,6 +1991,16 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
        if (event.source.type === 'user') {
          const userId = event.source.userId;
          if (userId) {
+           // レートリミットチェック (1日100回制限)
+           const allowed = await checkAndUpdateRateLimit(userId, supabase)
+           if (!allowed) {
+              await client.replyMessage({ 
+                  replyToken: event.replyToken, 
+                  messages: [{ type: 'text', text: '⚠️ 1日のAI利用上限（100回）に達しました。セキュリティ保護のため一時的に制限されています。明日またご利用ください。' }] 
+              })
+              continue
+           }
+
            const { data: userData } = await supabase.from('users').select('is_premium').eq('line_user_id', userId).single();
            if (!userData?.is_premium) {
              const premiumUrl = env.LINE_LIFF_ID_PREMIUM ? `https://liff.line.me/${env.LINE_LIFF_ID_PREMIUM}/premium` : `https://liff.line.me/${env.LINE_LIFF_ID}`;
