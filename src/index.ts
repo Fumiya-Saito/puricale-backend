@@ -770,6 +770,7 @@ app.get('/settings', async (c) => {
             </details>
           </section>
 
+          <!-- TODO: 通知機能はアーキテクチャ見直しのため一旦ペンディング
           <section>
             <h3>🔔 事前通知タイミング <span style="font-size:0.8rem; background:#00c288; color:white; padding:2px 6px; border-radius:4px; margin-left:8px;">プレミアム</span></h3>
             <p>
@@ -790,6 +791,7 @@ app.get('/settings', async (c) => {
               ${isPremium ? '<button type="submit" style="margin-top:15px; padding:8px;">通知タイミングを保存</button>' : ''}
             </form>
           </section>
+          -->
 
         </main>
       </body>
@@ -2049,6 +2051,9 @@ ${contextText}`;
 
 // --- Scheduled Task (Cron) ---
 async function handleScheduled(event: any, env: Bindings) {
+  // TODO: 通知機能は将来のアップデート（マイページでの予定管理機能）が実装されるまで一時停止
+  return;
+
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_KEY)
   const client = new messagingApi.MessagingApiClient({ channelAccessToken: env.LINE_CHANNEL_ACCESS_TOKEN })
 
