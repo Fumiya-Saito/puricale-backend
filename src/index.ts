@@ -439,7 +439,7 @@ app.get('/liff/entry', (c) => {
             } else {
               document.getElementById('status').innerText = '認証に失敗しました。LINEから開き直してください。'
             }
-          } catch(e: any) {
+          } catch(e) {
             document.getElementById('status').innerText = 'エラーが発生しました: ' + e
           }
         }
