@@ -1795,7 +1795,9 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
              });
            }
 
+           const todayStr = new Date().toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
            const systemInstruction = `あなたは幼稚園・学校のプリントから情報を探すAIアシスタントです。
+本日の日付は ${todayStr} です。ユーザーが「明日」「来週」など相対的な日付を指定した場合は、必ずこの基準日から計算して答えてください。
 以下のユーザーの過去のプリント情報を元に、ユーザーからの質問に答えてください。
 - 質問の答えがプリント情報に含まれていない場合は「プリントには記載がありませんでした」と正直に答えてください。
 - 回答はフレンドリーで親しみやすいトーン（絵文字も適度に使う）でお願いします。
