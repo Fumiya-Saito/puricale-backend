@@ -1370,10 +1370,10 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
 
              // カレンダー並列登録
              const calendarPromises = keptEvents.map(async (ev) => {
-               let startObj: any = { dateTime: ev.start, timeZone: 'Asia/Tokyo' }
-               let endObj: any = { dateTime: ev.end || ev.start, timeZone: 'Asia/Tokyo' }
+               let startObj: any = { dateTime: ev.start || '', timeZone: 'Asia/Tokyo' }
+               let endObj: any = { dateTime: ev.end || ev.start || '', timeZone: 'Asia/Tokyo' }
 
-               if (ev.start.endsWith('T00:00:00')) {
+               if (ev.start && ev.start.endsWith('T00:00:00')) {
                  const startDateStr = ev.start.split('T')[0]
                  let endDateStr = ev.end ? ev.end.split('T')[0] : startDateStr
                  
