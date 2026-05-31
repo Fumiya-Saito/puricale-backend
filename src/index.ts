@@ -1220,6 +1220,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
       const data = new URLSearchParams(event.postback.data)
       const action = data.get('action')
       const targetMsgId = data.get('msgId')
+      const targetChildId = data.get('targetChildId')
       const userId = event.source.userId
       
       if (!targetMsgId || !userId) continue
@@ -1373,45 +1374,76 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
 
                const isAll = !safeTarget || safeTarget.includes('全') || safeTarget.includes('保護者')
 
-               if (!isAll && childSettings.length > 0) {
-                 // 最もマッチする子供を探す
-                 let bestMatch = null
-                 for (const child of childSettings) {
-                   const cKeywords = child.keywords || []
-                   const isMatch = cKeywords.some((kw: string) => {
+               if (targetChildId && targetChildId !== 'shared') {
+                 // 👤 ユーザーが特定の子供を指定した場合
+                 const selectedChild = childSettings.find(c => c.id === targetChildId)
+                 if (selectedChild) {
+                   targetCalId = selectedChild.calendar_id
+                   matchedChildName = selectedChild.name
+                   
+                   if (!isAll) {
+                     // 個別イベントの場合、キーワードにマッチするか確認
+                     const isMatch = selectedChild.keywords.some((kw: string) => {
+                       if (safeTarget.includes(kw) || kw.includes(safeTarget)) return true
+                       const nKw = normalize(kw)
+                       const nTarget = normalize(safeTarget)
+                       if (nKw.length < 2 || nTarget.length < 2) return false
+                       return nTarget.includes(nKw) || nKw.includes(nTarget)
+                     })
+                     
+                     if (!isMatch) {
+                       // 他の学年の予定などは対象外として弾く
+                       ignoredEvents.push({ ...ev, reason: `対象外（${safeTarget}）` })
+                       continue
+                     }
+                   }
+                 }
+               } else if (targetChildId === 'shared') {
+                 // 🏠 家族共有用を指定した場合、すべて共有カレンダーに入れる（フィルターなし）
+                 targetCalId = sharedCalendarId
+                 matchedChildName = '家族共有'
+               } else {
+                 // 🤖 AIにおまかせ（自動振り分け）
+                 if (!isAll && childSettings.length > 0) {
+                   // 最もマッチする子供を探す
+                   let bestMatch = null
+                   for (const child of childSettings) {
+                     const cKeywords = child.keywords || []
+                     const isMatch = cKeywords.some((kw: string) => {
+                       if (safeTarget.includes(kw) || kw.includes(safeTarget)) return true
+                       const nKw = normalize(kw)
+                       const nTarget = normalize(safeTarget)
+                       if (nKw.length < 2 || nTarget.length < 2) return false
+                       return nTarget.includes(nKw) || nKw.includes(nTarget)
+                     })
+                     
+                     if (isMatch) {
+                       // 複数の子供にマッチした場合（共通イベントや誤判定疑い）は、安全のため共有にフォールバック
+                       if (bestMatch) {
+                         bestMatch = null
+                         break
+                       }
+                       bestMatch = child
+                     }
+                   }
+
+                   if (bestMatch && bestMatch.calendar_id) {
+                     targetCalId = bestMatch.calendar_id
+                     matchedChildName = bestMatch.name || 'お子様'
+                   }
+                 } else if (!isAll && childSettings.length === 0 && userKeywords.length > 0) {
+                   // 旧仕様の互換性維持（child_settingsがなく、keywordsが設定されている場合）
+                   const isOldMatch = userKeywords.some((kw: string) => {
                      if (safeTarget.includes(kw) || kw.includes(safeTarget)) return true
                      const nKw = normalize(kw)
                      const nTarget = normalize(safeTarget)
                      if (nKw.length < 2 || nTarget.length < 2) return false
                      return nTarget.includes(nKw) || nKw.includes(nTarget)
                    })
-                   
-                   if (isMatch) {
-                     // 複数の子供にマッチした場合（共通イベントや誤判定疑い）は、安全のため共有にフォールバック
-                     if (bestMatch) {
-                       bestMatch = null
-                       break
-                     }
-                     bestMatch = child
+                   if (!isOldMatch) {
+                     ignoredEvents.push({ ...ev, reason: `対象外（${safeTarget}）` })
+                     continue
                    }
-                 }
-
-                 if (bestMatch && bestMatch.calendar_id) {
-                   targetCalId = bestMatch.calendar_id
-                   matchedChildName = bestMatch.name || 'お子様'
-                 }
-               } else if (!isAll && childSettings.length === 0 && userKeywords.length > 0) {
-                 // 旧仕様の互換性維持（child_settingsがなく、keywordsが設定されている場合）
-                 const isOldMatch = userKeywords.some((kw: string) => {
-                   if (safeTarget.includes(kw) || kw.includes(safeTarget)) return true
-                   const nKw = normalize(kw)
-                   const nTarget = normalize(safeTarget)
-                   if (nKw.length < 2 || nTarget.length < 2) return false
-                   return nTarget.includes(nKw) || nKw.includes(nTarget)
-                 })
-                 if (!isOldMatch) {
-                   ignoredEvents.push(ev)
-                   continue
                  }
                }
 
@@ -1917,9 +1949,14 @@ ${contextText}`;
     // ---------------------------------------------------------
     if (event.type === 'message' && event.message.type === 'image') {
        const messageId = event.message.id
+       const userId = event.source.userId
+       if (!userId) continue
+       
+       const { data: userData } = await supabase.from('users').select('child_settings').eq('line_user_id', userId).single()
+       const childSettings = userData?.child_settings || []
        
        // 確認バブルを作成
-       const confirmMsg = createConfirmBubble(messageId)
+       const confirmMsg = createConfirmBubble(messageId, childSettings)
        
        // 無料の ReplyMessage でボタンを送る
        await client.replyMessage({

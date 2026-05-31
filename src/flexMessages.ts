@@ -250,7 +250,66 @@ export function generateFlexMessages(keptEvents: any[], ignoredEvents: any[], me
 }
 
 // 4. 【新設】解析開始の確認用バブル
-export function createConfirmBubble(messageId: string): FlexBubble {
+export function createConfirmBubble(messageId: string, childSettings: any[] = []): FlexBubble {
+  const buttons: any[] = []
+
+  if (childSettings && childSettings.length > 0) {
+    buttons.push({
+      type: 'button',
+      style: 'primary',
+      height: 'sm',
+      action: {
+        type: 'postback',
+        label: '🤖 AIにおまかせ',
+        data: `action=analyze&msgId=${messageId}`,
+        displayText: 'AIおまかせで解析します'
+      }
+    })
+    
+    buttons.push({
+      type: 'button',
+      style: 'secondary',
+      height: 'sm',
+      margin: 'sm',
+      action: {
+        type: 'postback',
+        label: '🏠 家族共有用',
+        data: `action=analyze&msgId=${messageId}&targetChildId=shared`,
+        displayText: '家族共有用として解析します'
+      }
+    })
+
+    childSettings.forEach(child => {
+      // ユーザーが入力した名前が長い場合は切り詰める
+      const childName = child.name.length > 10 ? child.name.substring(0, 10) + '...' : child.name
+      buttons.push({
+        type: 'button',
+        style: 'secondary',
+        height: 'sm',
+        margin: 'sm',
+        action: {
+          type: 'postback',
+          label: `👤 ${childName}用`,
+          data: `action=analyze&msgId=${messageId}&targetChildId=${child.id}`,
+          displayText: `${childName}用として解析します`
+        }
+      })
+    })
+  } else {
+    // 子供設定がない場合は今まで通りの1ボタン
+    buttons.push({
+      type: 'button',
+      style: 'primary',
+      height: 'sm',
+      action: {
+        type: 'postback',
+        label: '解析する',
+        data: `action=analyze&msgId=${messageId}`,
+        displayText: '解析を開始します'
+      }
+    })
+  }
+
   return {
     type: 'bubble',
     size: 'kilo',
@@ -267,7 +326,7 @@ export function createConfirmBubble(messageId: string): FlexBubble {
         },
         {
           type: 'text',
-          text: '学校プリントの解析を開始しますか？\n（関係ない画像の場合は無視してください）',
+          text: 'どのカレンダー用に解析しますか？\n（関係ない画像の場合は無視してください）',
           size: 'xs',
           color: '#aaaaaa',
           wrap: true,
@@ -278,19 +337,8 @@ export function createConfirmBubble(messageId: string): FlexBubble {
     footer: {
       type: 'box',
       layout: 'vertical',
-      contents: [
-        {
-          type: 'button',
-          style: 'primary',
-          height: 'sm',
-          action: {
-            type: 'postback',
-            label: '解析する',
-            data: `action=analyze&msgId=${messageId}`, // ここで画像のIDを引き継ぐ
-            displayText: '解析を開始します'
-          }
-        }
-      ]
+      spacing: 'sm',
+      contents: buttons
     }
   }
 }
