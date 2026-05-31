@@ -10,7 +10,7 @@ import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai'
 import { messagingApi, WebhookEvent } from '@line/bot-sdk'
 import { z } from 'zod'
 import { sign, verify } from 'hono/jwt'
-import { generateFlexMessages, createConfirmBubble, createSettingsBubble, createHelpBubble, createPastRecordBubble, createRestoredPrintBubble, createNoTicketBubble } from './flexMessages'
+import { generateFlexMessages, createConfirmBubble, createSettingsBubble, createHelpBubble, createPastRecordBubble, createRestoredPrintBubble, createNoTicketBubble, createAuthRequestBubble } from './flexMessages'
 
 type Bindings = {
   GOOGLE_CLIENT_ID: string
@@ -1252,7 +1252,8 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                 const payload = { sub: userId, exp: Math.floor(Date.now() / 1000) + 600 }
                 const token = await sign(payload, env.JWT_SECRET, 'HS256')
                 const lpUrl = `${baseUrl}/auth/landing?userId=${userId}&openExternalBrowser=1`
-                await client.replyMessage({ replyToken: event.replyToken, messages: [{ type: 'text', text: `連携が必要です👇\n${lpUrl}` }] })
+                const authBubble = createAuthRequestBubble(lpUrl)
+                await client.replyMessage({ replyToken: event.replyToken, messages: [{ type: 'flex', altText: '🔗 連携が必要です', contents: authBubble as any }] })
                 continue
              }
 

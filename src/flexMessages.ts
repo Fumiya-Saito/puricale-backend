@@ -674,3 +674,51 @@ export function createNoTicketBubble(premiumUrl: string): FlexBubble {
     }
   }
 }
+
+// 10. 【新設】初期設定（Google連携）お願いバブル
+export function createAuthRequestBubble(lpUrl: string): FlexBubble {
+  return {
+    type: 'bubble',
+    size: 'kilo',
+    header: {
+      type: 'box',
+      layout: 'vertical',
+      contents: [
+        { type: 'text', text: '🔗 連携が必要です', weight: 'bold', color: '#ffffff', size: 'md' }
+      ],
+      backgroundColor: '#3498db',
+      paddingAll: 'md'
+    },
+    body: {
+      type: 'box',
+      layout: 'vertical',
+      contents: [
+        {
+          type: 'text',
+          text: '予定を自動で登録するために、Googleカレンダーとの連携をお願いします！👇',
+          wrap: true,
+          size: 'sm',
+          color: '#333333',
+          margin: 'sm'
+        }
+      ]
+    },
+    footer: {
+      type: 'box',
+      layout: 'vertical',
+      contents: [
+        {
+          type: 'button',
+          style: 'primary',
+          height: 'sm',
+          color: '#3498db',
+          action: {
+            type: 'uri',
+            label: '連携して使い始める',
+            uri: lpUrl
+          }
+        }
+      ]
+    }
+  }
+}
