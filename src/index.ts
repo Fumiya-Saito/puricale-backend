@@ -1135,9 +1135,12 @@ app.post('/webhook', async (c) => {
   if (!isValid) return c.text('Unauthorized', 401)
 
   const body = JSON.parse(rawBody)
-  // ログ出力のためにcatchを追加
-  handleEvents(body.events, ENV, c.req.url)
-    .catch(err => console.error('🚨 Global Error in handleEvents:', err))
+  // Cloud Runのコンテナフリーズを防ぐため、処理が完了するまでレスポンスを返さない
+  try {
+    await handleEvents(body.events, ENV, c.req.url)
+  } catch (err) {
+    console.error('🚨 Global Error in handleEvents:', err)
+  }
   
   return c.json({ message: 'ok' })
 })
