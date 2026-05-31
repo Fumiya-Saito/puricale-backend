@@ -744,14 +744,7 @@ app.get('/settings', async (c) => {
             </details>
           </section>
 
-          <section>
-            <h3>📦 データエクスポート</h3>
-            <p>
-              登録された予定と設定データをJSON形式でダウンロードできます。<br>
-              <small>※ データはあなた自身のものです。いつでも安全に取り出し・保存できます。</small>
-            </p>
-            <a href="/export/data" class="export-btn">📥 JSONでダウンロード</a>
-          </section>
+
 
         </main>
       </body>
