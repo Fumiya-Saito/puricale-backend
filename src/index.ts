@@ -1283,7 +1283,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                 - 「1年2組」「1-2」のような【学年・クラス表記】を日付(1月2日)と混同するな。これは日付ではない。
                 - 月が明記されていない日付（例: "15日"）は、リストの並び順（時系列）を見て補完せよ。前の行より数字が小さくなった場合のみ翌月と判断せよ。
                 - 本日の月と比較し、イベント月が明らかに小さい場合（例: 本日が12月でイベントが1月）は翌年、それ以外は${jstNow.getFullYear()}年とする。
-             4. 時間: 開始時刻不明なら "00:00:00"。複数日にまたがる行事（例: 25日〜29日 10:00〜10:40）の場合、そのまま時間を設定すると「何日間も続くぶっ通しの予定」になってしまうため、時間は "00:00:00" とし、具体的な時間は summary や description に記載すること。
+             4. 時間: 開始時刻不明なら "00:00:00"。複数日にまたがる行事（開始日と終了日が異なる場合）は、**必ず時間を "00:00:00" に設定して終日予定として扱え**。具体的な時間は summary または description に記載すること。
              5. 対象(target) 【重要】: 
                 - 対象が「特定の1つの学年・クラス」に100%限定できる場合のみ、その学年・クラスを抽出せよ。
                 - 表記は「X年Y組」「X年」に統一せよ。
@@ -1955,17 +1955,26 @@ ${contextText}`;
        const userId = event.source.userId
        if (!userId) continue
        
-       const { data: userData } = await supabase.from('users').select('child_settings').eq('line_user_id', userId).single()
-       const childSettings = userData?.child_settings || []
-       
-       // 確認バブルを作成
-       const confirmMsg = createConfirmBubble(messageId, childSettings)
-       
-       // 無料の ReplyMessage でボタンを送る
-       await client.replyMessage({
-         replyToken: event.replyToken,
-         messages: [{ type: 'flex', altText: '📷 画像を確認しました', contents: confirmMsg as any }]
-       })
+       try {
+         const { data: userData, error } = await supabase.from('users').select('child_settings').eq('line_user_id', userId).single()
+         if (error && error.code !== 'PGRST116') throw error; // Ignore not found
+         const childSettings = userData?.child_settings || []
+         
+         // 確認バブルを作成
+         const confirmMsg = createConfirmBubble(messageId, childSettings)
+         
+         // 無料の ReplyMessage でボタンを送る
+         await client.replyMessage({
+           replyToken: event.replyToken,
+           messages: [{ type: 'flex', altText: '📷 画像を確認しました', contents: confirmMsg as any }]
+         })
+       } catch (err: any) {
+         console.error('Image handling error:', err)
+         await client.replyMessage({
+           replyToken: event.replyToken,
+           messages: [{ type: 'text', text: 'ごめんなさい💦 処理中にエラーが発生しました。時間を置いてもう一度お試しください🙏' }]
+         }).catch(e => console.error(e))
+       }
        continue
     }
   }
