@@ -1370,6 +1370,22 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
 
              // カレンダー並列登録
              const calendarPromises = keptEvents.map(async (ev) => {
+               let startObj: any = { dateTime: ev.start, timeZone: 'Asia/Tokyo' }
+               let endObj: any = { dateTime: ev.end || ev.start, timeZone: 'Asia/Tokyo' }
+
+               if (ev.start.endsWith('T00:00:00')) {
+                 const startDateStr = ev.start.split('T')[0]
+                 let endDateStr = ev.end ? ev.end.split('T')[0] : startDateStr
+                 
+                 // Google Calendar APIの終日予定(date指定)のendは「翌日(exclusive)」である必要がある
+                 const d = new Date(endDateStr)
+                 d.setDate(d.getDate() + 1)
+                 const exclusiveEndStr = d.toISOString().split('T')[0]
+
+                 startObj = { date: startDateStr }
+                 endObj = { date: exclusiveEndStr }
+               }
+
                const res = await fetchWithRetry(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(ev.targetCalendarId)}/events`, {
                    method: 'POST',
                    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -1377,8 +1393,8 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                      summary: sanitizeText(ev.summary, 100),
                      location: sanitizeText(ev.location, 100),
                      description: sanitizeText(ev.description, 1000),
-                     start: { dateTime: ev.start, timeZone: 'Asia/Tokyo' },
-                     end: { dateTime: ev.end || ev.start, timeZone: 'Asia/Tokyo' }
+                     start: startObj,
+                     end: endObj
                    })
                })
                const data = await res.json() as any
