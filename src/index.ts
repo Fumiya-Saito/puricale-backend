@@ -2009,8 +2009,21 @@ async function handleScheduled(event: any, env: Bindings) {
     userEvents[ev.user_id].push(ev)
   })
 
-  // ユーザーごとにまとめて送信（最大5件まで）
+  // ユーザーのプレミアム状態を一括取得
+  const userIds = Object.keys(userEvents)
+  const { data: usersData } = await supabase
+    .from('users')
+    .select('line_user_id, is_premium')
+    .in('line_user_id', userIds)
+    
+  const premiumUserIds = new Set(
+    (usersData || []).filter(u => u.is_premium).map(u => u.line_user_id)
+  )
+
+  // ユーザーごとにまとめて送信（最大5件まで、プレミアム会員のみ）
   for (const [userId, events] of Object.entries(userEvents)) {
+    if (!premiumUserIds.has(userId)) continue; // プレミアム会員限定機能
+
     const limitedEvents = events.slice(0, 5)
     const messages = limitedEvents.map(ev => {
       // 2026-05-26T09:00:00+09:00 -> 05/26 09:00
