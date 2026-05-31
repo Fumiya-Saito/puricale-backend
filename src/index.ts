@@ -364,7 +364,32 @@ app.get('/auth/callback', async (c) => {
     access_token: tokens.access_token,
     expiry_date: Date.now() + (tokens.expires_in * 1000)
   })
-  return c.html(`<h1>連携完了</h1><p>LINEに戻ってください。</p>`)
+  return c.html(`
+    <!DOCTYPE html>
+    <html lang="ja">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>連携完了 - プリカレ</title>
+      <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+      <style>
+        body { padding: 1rem; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; background-color: #f8f9fa; color: #2c3e50; margin: 0; font-family: sans-serif; }
+        main { background: white; padding: 2.5rem 1.5rem; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.05); text-align: center; max-width: 400px; width: 100%; border: 1px solid #eaeaea; }
+        h2 { color: #2c3e50; margin-bottom: 1rem; font-size: 1.5rem; font-weight: bold; border: none; }
+        p { color: #666; margin-bottom: 0; line-height: 1.6; font-size: 0.95rem; }
+        .check-icon { font-size: 4rem; margin-bottom: 1rem; animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; transform: scale(0); }
+        @keyframes popIn { to { transform: scale(1); } }
+      </style>
+    </head>
+    <body>
+      <main class="container">
+        <div class="check-icon">🎉</div>
+        <h2>連携が完了しました！</h2>
+        <p>Googleカレンダーとの連携に成功しました。<br><br>この画面（ブラウザ）を閉じて、<br><b>LINEのトーク画面</b>に戻ってください。</p>
+      </main>
+    </body>
+    </html>
+  `)
 })
 
 // --- Settings UI (LIFF Version) ---
