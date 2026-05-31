@@ -533,13 +533,14 @@ app.get('/settings', async (c) => {
 
   const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY)
   
-  // ユーザー設定（キーワード + カレンダーID + 子供設定 + プラン状態）を取得
-  const { data: userData } = await supabase.from('users').select('keywords, calendar_id, child_settings, is_premium, tickets').eq('line_user_id', userId).single()
+  // ユーザー設定（キーワード + カレンダーID + 子供設定 + プラン状態 + 通知タイミング）を取得
+  const { data: userData } = await supabase.from('users').select('keywords, calendar_id, child_settings, is_premium, tickets, reminder_days').eq('line_user_id', userId).single()
   const keywords: string[] = userData?.keywords || []
   const isPremium: boolean = userData?.is_premium || false
   const tickets: number = userData?.tickets || 0
   const currentCalendarId = userData?.calendar_id || 'primary'
   const childSettings: any[] = userData?.child_settings || []
+  const reminderDays: number = userData?.reminder_days ?? 3
 
   // カレンダー一覧を取得
   let calendars: any[] = []
@@ -769,7 +770,28 @@ app.get('/settings', async (c) => {
             </details>
           </section>
 
-
+          <!-- TODO: 通知機能はアーキテクチャ見直しのため一旦ペンディング
+          <section>
+            <h3>🔔 事前通知タイミング <span style="font-size:0.8rem; background:#00c288; color:white; padding:2px 6px; border-radius:4px; margin-left:8px;">プレミアム</span></h3>
+            <p>
+              行事予定の「何日前にリマインド通知（LINE）を送るか」を設定できます。
+            </p>
+            <form action="/settings/update_reminder_days" method="POST">
+              <label>
+                通知のタイミング
+                <select name="reminder_days" ${!isPremium ? 'disabled' : ''} required>
+                  <option value="1" ${reminderDays === 1 ? 'selected' : ''}>1日前</option>
+                  <option value="2" ${reminderDays === 2 ? 'selected' : ''}>2日前</option>
+                  <option value="3" ${reminderDays === 3 ? 'selected' : ''}>3日前</option>
+                  <option value="5" ${reminderDays === 5 ? 'selected' : ''}>5日前</option>
+                  <option value="7" ${reminderDays === 7 ? 'selected' : ''}>1週間前 (7日)</option>
+                </select>
+                ${!isPremium ? '<small style="color:#e74c3c;">※プレミアムプランに登録するとご利用いただけます</small>' : ''}
+              </label>
+              ${isPremium ? '<button type="submit" style="margin-top:15px; padding:8px;">通知タイミングを保存</button>' : ''}
+            </form>
+          </section>
+          -->
 
         </main>
       </body>
@@ -798,7 +820,28 @@ app.post('/settings/update_calendar', async (c) => {
   return c.redirect('/settings')
 })
 
-// Update Reminders Action
+// Update Reminder Days Action
+app.post('/settings/update_reminder_days', async (c) => {
+  const token = getCookie(c, 'auth_token')
+  if (!token) return c.text('Session Error', 403)
+  
+  let userId
+  try {
+    const payload = await verify(token, ENV.JWT_SECRET, 'HS256')
+    userId = payload.sub as string
+  } catch (e: any) { return c.text('Invalid Session', 403) }
+
+  const body = await c.req.parseBody()
+  const reminderDays = parseInt(body['reminder_days'] as string || '3', 10)
+
+  if (!isNaN(reminderDays)) {
+    const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY)
+    await supabase.from('users').update({ reminder_days: reminderDays }).eq('line_user_id', userId)
+  }
+  return c.redirect('/settings')
+})
+
+// Update Reminders Action (Legacy: Keywords)
 app.post('/settings/update_reminders', async (c) => {
   const token = getCookie(c, 'auth_token')
   if (!token) return c.text('Session Error', 403)
@@ -2008,68 +2051,79 @@ ${contextText}`;
 
 // --- Scheduled Task (Cron) ---
 async function handleScheduled(event: any, env: Bindings) {
+  // TODO: 通知機能は将来のアップデート（マイページでの予定管理機能）が実装されるまで一時停止
+  return;
+
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_KEY)
   const client = new messagingApi.MessagingApiClient({ channelAccessToken: env.LINE_CHANNEL_ACCESS_TOKEN })
 
-  // JSTで3日後の日付文字列 (YYYY-MM-DD) を取得
-  const targetDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
-  const jstTarget = new Date(targetDate.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }))
-  
-  // yyyy-mm-dd にフォーマット
-  const year = jstTarget.getFullYear()
-  const month = String(jstTarget.getMonth() + 1).padStart(2, '0')
-  const day = String(jstTarget.getDate()).padStart(2, '0')
-  const targetDateStr = `${year}-${month}-${day}`
+  // 1. プレミアムユーザーとその通知設定日数を取得
+  const { data: premiumUsers } = await supabase
+    .from('users')
+    .select('line_user_id, reminder_days')
+    .eq('is_premium', true)
 
-  // 3日後に行われるイベントを取得
-  const { data: upcomingEvents } = await supabase
-    .from('calendar_events')
-    .select('user_id, summary, start_time')
-    .like('start_time', `${targetDateStr}%`)
+  if (!premiumUsers || premiumUsers.length === 0) return
 
-  if (!upcomingEvents || upcomingEvents.length === 0) return
-
-  const userEvents: Record<string, any[]> = {}
-  upcomingEvents.forEach(ev => {
-    if (!userEvents[ev.user_id]) userEvents[ev.user_id] = []
-    userEvents[ev.user_id].push(ev)
+  // 2. reminder_days ごとにユーザーをグループ化 (デフォルトは3)
+  const usersByDays: Record<number, string[]> = {}
+  premiumUsers.forEach(u => {
+    const days = u.reminder_days ?? 3
+    if (!usersByDays[days]) usersByDays[days] = []
+    usersByDays[days].push(u.line_user_id)
   })
 
-  // ユーザーのプレミアム状態を一括取得
-  const userIds = Object.keys(userEvents)
-  const { data: usersData } = await supabase
-    .from('users')
-    .select('line_user_id, is_premium')
-    .in('line_user_id', userIds)
+  // 3. 日数グループごとに処理
+  for (const [daysStr, userIds] of Object.entries(usersByDays)) {
+    const days = parseInt(daysStr, 10)
     
-  const premiumUserIds = new Set(
-    (usersData || []).filter(u => u.is_premium).map(u => u.line_user_id)
-  )
+    // JSTで `days` 日後の日付文字列 (YYYY-MM-DD) を取得
+    const targetDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000)
+    const jstTarget = new Date(targetDate.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }))
+    
+    const year = jstTarget.getFullYear()
+    const month = String(jstTarget.getMonth() + 1).padStart(2, '0')
+    const day = String(jstTarget.getDate()).padStart(2, '0')
+    const targetDateStr = `${year}-${month}-${day}`
 
-  // ユーザーごとにまとめて送信（最大5件まで、プレミアム会員のみ）
-  for (const [userId, events] of Object.entries(userEvents)) {
-    if (!premiumUserIds.has(userId)) continue; // プレミアム会員限定機能
+    // その日に行われるイベントを取得（かつ、対象ユーザーのもののみ）
+    const { data: upcomingEvents } = await supabase
+      .from('calendar_events')
+      .select('user_id, summary, start_time')
+      .in('user_id', userIds)
+      .like('start_time', `${targetDateStr}%`)
 
-    const limitedEvents = events.slice(0, 5)
-    const messages = limitedEvents.map(ev => {
-      // 2026-05-26T09:00:00+09:00 -> 05/26 09:00
-      const datePart = ev.start_time.slice(5, 10).replace('-', '/')
-      const timePart = (ev.start_time.includes('T') && ev.start_time.length > 10) ? ev.start_time.slice(11, 16) : ''
-      const timeStr = timePart === '00:00' ? datePart : (timePart ? `${datePart} ${timePart}` : datePart)
+    if (!upcomingEvents || upcomingEvents.length === 0) continue
 
-      return {
-        type: 'text',
-        text: `🔔 まもなく【${sanitizeText(ev.summary, 20)}】ですね！\n（${timeStr}）\n\n準備はバッチリですか？忘れ物がないか確認しましょう！`
-      }
+    const userEvents: Record<string, any[]> = {}
+    upcomingEvents.forEach(ev => {
+      if (!userEvents[ev.user_id]) userEvents[ev.user_id] = []
+      userEvents[ev.user_id].push(ev)
     })
 
-    try {
-      await client.pushMessage({
-        to: userId,
-        messages: messages as any
+    // ユーザーごとにまとめて送信（最大5件まで）
+    for (const [userId, events] of Object.entries(userEvents)) {
+      const limitedEvents = events.slice(0, 5)
+      const messages = limitedEvents.map(ev => {
+        // 2026-05-26T09:00:00+09:00 -> 05/26 09:00
+        const datePart = ev.start_time.slice(5, 10).replace('-', '/')
+        const timePart = (ev.start_time.includes('T') && ev.start_time.length > 10) ? ev.start_time.slice(11, 16) : ''
+        const timeStr = timePart === '00:00' ? datePart : (timePart ? `${datePart} ${timePart}` : datePart)
+
+        return {
+          type: 'text',
+          text: `🔔 まもなく【${sanitizeText(ev.summary, 20)}】ですね！\n（${timeStr}）\n\n準備はバッチリですか？忘れ物がないか確認しましょう！`
+        }
       })
-    } catch (e: any) {
-      console.error(`Failed to send reminder to ${userId}:`, e)
+
+      try {
+        await client.pushMessage({
+          to: userId,
+          messages: messages as any
+        })
+      } catch (e: any) {
+        console.error(`Failed to send reminder to ${userId}:`, e)
+      }
     }
   }
 }
