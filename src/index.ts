@@ -659,10 +659,13 @@ app.get('/settings', async (c) => {
               <article style="padding:15px; margin-bottom:15px; border:1px solid #ddd; background:#fafafa;">
                 <h4 style="margin:0 0 10px 0; font-size:1rem; display:flex; justify-content:space-between; align-items:center;">
                   <span>👤 ${sanitizeText(child.name, 20)}</span>
-                  <form action="/settings/delete_child" method="POST" style="margin:0;" onsubmit="return confirm('削除しますか？')">
-                    <input type="hidden" name="child_id" value="${child.id}">
-                    <button type="submit" style="background:none; border:none; color:#e74c3c; padding:0; width:auto; font-size:0.9rem;">削除</button>
-                  </form>
+                  <div style="display:flex; gap:10px;">
+                    <button type="button" onclick="document.getElementById('edit-child-${child.id}').style.display='block'" style="background:none; border:none; color:#3498db; padding:0; width:auto; font-size:0.9rem; cursor:pointer;">編集</button>
+                    <form action="/settings/delete_child" method="POST" style="margin:0;" onsubmit="return confirm('削除しますか？')">
+                      <input type="hidden" name="child_id" value="${child.id}">
+                      <button type="submit" style="background:none; border:none; color:#e74c3c; padding:0; width:auto; font-size:0.9rem; cursor:pointer;">削除</button>
+                    </form>
+                  </div>
                 </h4>
                 
                 <div style="font-size:0.85rem; margin-bottom:8px;">
@@ -672,6 +675,31 @@ app.get('/settings', async (c) => {
                 <div style="font-size:0.85rem; display:flex; align-items:center; flex-wrap:wrap; gap:4px;">
                   <strong>キーワード:</strong> 
                   ${child.keywords.map((k: string) => `<span class="tag" style="font-size:0.8rem; padding:2px 8px;">${sanitizeText(k, 15)}</span>`).join('')}
+                </div>
+
+                <!-- 編集フォーム (非表示) -->
+                <div id="edit-child-${child.id}" style="display:none; margin-top:10px; padding:10px; border:1px dashed #ccc; border-radius:4px; background:#fff;">
+                  <form action="/settings/edit_child" method="POST" style="margin:0;">
+                    <input type="hidden" name="child_id" value="${child.id}">
+                    <label style="font-size:0.85rem; display:block;">
+                      お名前
+                      <input type="text" name="name" value="${sanitizeText(child.name, 20)}" required maxlength="20" style="width:100%; padding:4px; margin-top:2px;">
+                    </label>
+                    <label style="font-size:0.85rem; display:block; margin-top:5px;">
+                      カレンダー選択
+                      <select name="calendar_id" required style="width:100%; padding:4px; margin-top:2px;">
+                        ${calendars.map((c: any) => `<option value="${c.id}" ${c.id === child.calendar_id ? 'selected' : ''}>${sanitizeText(c.summary, 30)}</option>`).join('')}
+                      </select>
+                    </label>
+                    <label style="font-size:0.85rem; display:block; margin-top:5px;">
+                      キーワード（カンマ区切り）
+                      <input type="text" name="keywords" value="${child.keywords.join(', ')}" required maxlength="50" style="width:100%; padding:4px; margin-top:2px;">
+                    </label>
+                    <div style="display:flex; gap:10px; margin-top:10px;">
+                      <button type="submit" style="flex:1; background:#4ECDC4; color:#fff; border:none; padding:6px; border-radius:4px; font-weight:bold; cursor:pointer;">保存</button>
+                      <button type="button" onclick="document.getElementById('edit-child-${child.id}').style.display='none'" style="flex:1; background:#e2e8f0; color:#4a5568; border:none; padding:6px; border-radius:4px; cursor:pointer;">キャンセル</button>
+                    </div>
+                  </form>
                 </div>
               </article>
             `).join('')}
@@ -795,6 +823,39 @@ app.post('/settings/add_child', async (c) => {
     currentSettings.push(newChild)
     
     await supabase.from('users').update({ child_settings: currentSettings }).eq('line_user_id', userId)
+  }
+  return c.redirect('/settings')
+})
+
+// Edit Child Action
+app.post('/settings/edit_child', async (c) => {
+  const token = getCookie(c, 'auth_token')
+  if (!token) return c.text('Session Error', 403)
+  
+  let userId
+  try {
+    const payload = await verify(token, ENV.JWT_SECRET, 'HS256')
+    userId = payload.sub as string
+  } catch (e: any) { return c.text('Invalid Session', 403) }
+
+  const body = await c.req.parseBody()
+  const childId = body['child_id'] as string
+  const name = sanitizeText(body['name'] as string, 20)
+  const calendarId = body['calendar_id'] as string
+  const keywordsRaw = body['keywords'] as string
+
+  if (childId && name && calendarId && keywordsRaw) {
+    const keywords = keywordsRaw.split(',').map(k => sanitizeText(k.trim(), 20)).filter(k => k)
+    const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY)
+    
+    const { data } = await supabase.from('users').select('child_settings').eq('line_user_id', userId).single()
+    const currentSettings = data?.child_settings || []
+    
+    const targetIndex = currentSettings.findIndex((child: any) => child.id === childId)
+    if (targetIndex !== -1) {
+      currentSettings[targetIndex] = { ...currentSettings[targetIndex], name, calendar_id: calendarId, keywords }
+      await supabase.from('users').update({ child_settings: currentSettings }).eq('line_user_id', userId)
+    }
   }
   return c.redirect('/settings')
 })
