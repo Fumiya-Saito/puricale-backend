@@ -1063,7 +1063,15 @@ app.post('/api/mypage/gallery', async (c) => {
     .order('created_at', { ascending: false });
 
   if (keyword) {
-    query = query.or(`title.ilike.%${keyword}%,full_ocr_text.ilike.%${keyword}%`);
+    // 全角・半角スペースでキーワードを分割して、複数キーワードのAND検索に対応
+    const words = keyword.split(/[\s　]+/).filter(w => w.length > 0);
+    for (const word of words) {
+      // PostgRESTの構文エラーを防ぐため、カンマやダブルクォーテーション等を除去
+      const safeWord = word.replace(/[",\\]/g, ''); 
+      if (safeWord) {
+        query = query.or(`title.ilike.%${safeWord}%,full_ocr_text.ilike.%${safeWord}%`);
+      }
+    }
   }
 
   const from = (page - 1) * limit;
