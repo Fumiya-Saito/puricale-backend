@@ -125,6 +125,72 @@ async function checkAndUpdateRateLimit(userId: string, supabase: any): Promise<b
   return true;
 }
 
+async function checkAndUpdateChatRateLimit(userId: string, isPremium: boolean, supabase: any): Promise<boolean> {
+  const { data } = await supabase.from('users')
+    .select('daily_chat_usage, last_api_used_date')
+    .eq('line_user_id', userId)
+    .single();
+
+  if (!data) return true;
+
+  const d = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+  const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  let usage = data.daily_chat_usage || 0;
+  const lastDate = data.last_api_used_date; // share the reset date column for simplicity, or just reset based on last_api_used_date logic
+
+  if (lastDate !== todayStr) {
+    usage = 0;
+  }
+
+  // プレミアムは無制限、非プレミアムは1日3回まで
+  if (!isPremium && usage >= 3) {
+    return false;
+  }
+
+  // Update only if non-premium to track usage
+  if (!isPremium) {
+    await supabase.from('users')
+      .update({ 
+        daily_chat_usage: usage + 1,
+        last_api_used_date: todayStr // sync the reset date
+      })
+      .eq('line_user_id', userId);
+  }
+
+  return true;
+}
+
+function createPremiumCtaBubble(premiumUrl: string) {
+  return {
+    type: "bubble",
+    hero: {
+      type: "image",
+      url: "https://i.imgur.com/example.png",
+      size: "full",
+      aspectRatio: "20:13",
+      aspectMode: "cover",
+      backgroundColor: "#4ECDC4"
+    },
+    body: {
+      type: "box",
+      layout: "vertical",
+      contents: [
+        { type: "text", text: "AIアシスタント", weight: "bold", size: "xl" },
+        { type: "text", text: "プレミアムプランなら無制限✨", size: "md", color: "#aaaaaa", margin: "sm" },
+        { type: "text", text: "過去のプリントから「次のお弁当の日は？」「明日の持ち物は？」など何でもお答えします！\n本日の無料お試し枠（3回）を使い切りました。", wrap: true, margin: "md", size: "sm" }
+      ]
+    },
+    footer: {
+      type: "box",
+      layout: "vertical",
+      contents: [
+        { type: "button", style: "primary", color: "#4ECDC4", action: { type: "uri", label: "プレミアム版の詳細を見る", uri: premiumUrl } }
+      ]
+    }
+  };
+}
+
 async function generateContentWithRetry(model: any, promptParts: any[], maxRetries = 3) {
   for (let i = 0; i < maxRetries; i++) {
     try {
@@ -155,6 +221,7 @@ async function getWritableCalendars(accessToken: string) {
     })
     if (!res.ok) return []
     const data = await res.json() as any
+    if (!data || !data.items) return [] // APIレスポンス異常時のクラッシュガード
     // owner(所有者) または writer(編集者) 権限があるもののみ抽出
     return data.items.filter((c: any) => c.accessRole === 'owner' || c.accessRole === 'writer')
   } catch { return [] }
@@ -295,29 +362,40 @@ app.post('/api/stripe-webhook', async (c) => {
 
   const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY);
 
-  switch (event.type) {
-    case 'checkout.session.completed': {
-      const session = event.data.object as Stripe.Checkout.Session;
-      const userId = session.metadata?.line_user_id;
-      const isSubscription = session.metadata?.isSubscription === 'true';
+  try {
+    switch (event.type) {
+      case 'checkout.session.completed': {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const userId = session.metadata?.line_user_id;
+        const isSubscription = session.metadata?.isSubscription === 'true';
 
-      if (userId) {
-        if (isSubscription) {
-          await supabase.from('users').update({ is_premium: true, stripe_subscription_id: session.subscription as string }).eq('line_user_id', userId);
-        } else {
-          // Increment tickets
-          const { data: user } = await supabase.from('users').select('tickets').eq('line_user_id', userId).single();
-          const currentTickets = user?.tickets || 0;
-          await supabase.from('users').update({ tickets: currentTickets + 5 }).eq('line_user_id', userId);
+        if (userId) {
+          if (isSubscription) {
+            const { error } = await supabase.from('users').update({ is_premium: true, stripe_subscription_id: session.subscription as string }).eq('line_user_id', userId);
+            if (error) throw new Error(`Supabase Error: ${error.message}`);
+          } else {
+            // Increment tickets
+            const { data: user, error: fetchError } = await supabase.from('users').select('tickets').eq('line_user_id', userId).single();
+            if (fetchError) throw new Error(`Supabase Fetch Error: ${fetchError.message}`);
+            
+            const currentTickets = user?.tickets || 0;
+            const { error: updateError } = await supabase.from('users').update({ tickets: currentTickets + 5 }).eq('line_user_id', userId);
+            if (updateError) throw new Error(`Supabase Update Error: ${updateError.message}`);
+          }
         }
+        break;
       }
-      break;
+      case 'customer.subscription.deleted': {
+        const subscription = event.data.object as Stripe.Subscription;
+        const { error } = await supabase.from('users').update({ is_premium: false, stripe_subscription_id: null }).eq('stripe_subscription_id', subscription.id);
+        if (error) throw new Error(`Supabase Error: ${error.message}`);
+        break;
+      }
     }
-    case 'customer.subscription.deleted': {
-      const subscription = event.data.object as Stripe.Subscription;
-      await supabase.from('users').update({ is_premium: false, stripe_subscription_id: null }).eq('stripe_subscription_id', subscription.id);
-      break;
-    }
+  } catch(e: any) {
+    console.error('Failed to update DB on Stripe webhook:', e);
+    // DB更新失敗時には 500 エラーを返し、Stripe側にリトライを促す
+    return c.json({ error: 'Internal Server Error' }, 500);
   }
 
   return c.json({ received: true });
@@ -1046,7 +1124,7 @@ app.post('/api/mypage/gallery', async (c) => {
   const userId = body?.userId;
   const page = parseInt(body?.page) || 1;
   const limit = parseInt(body?.limit) || 12;
-  const keyword = body?.keyword || '';
+  const keyword = String(body?.keyword || '');
 
   if (!userId) return c.json({ error: 'Unauthorized' }, 401);
 
@@ -1249,52 +1327,6 @@ app.post('/api/create-portal-session', async (c) => {
   }
 });
 
-app.post('/api/stripe-webhook', async (c) => {
-  const sig = c.req.header('stripe-signature');
-  const rawBody = await c.req.text();
-  const webhookSecret = ENV.STRIPE_WEBHOOK_SECRET;
-
-  if (!sig || !webhookSecret) return c.text('Webhook secret not configured', 400);
-
-  const stripe = new Stripe(ENV.STRIPE_SECRET_KEY);
-  let event;
-
-  try {
-    event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
-  } catch (err: any) {
-    return c.text(`Webhook Error: ${err.message}`, 400);
-  }
-
-  const supabase = createClient(ENV.SUPABASE_URL, ENV.SUPABASE_KEY);
-
-  try {
-    if (event.type === 'checkout.session.completed') {
-      const session = event.data.object;
-      const userId = session.client_reference_id;
-      if (userId) {
-        if (session.mode === 'subscription') {
-          await supabase.from('users').update({ 
-            is_premium: true, 
-            stripe_customer_id: session.customer 
-          }).eq('line_user_id', userId);
-        } else if (session.mode === 'payment') {
-          // Ticket purchase (5 tickets)
-          const { data: userData } = await supabase.from('users').select('tickets').eq('line_user_id', userId).single();
-          const currentTickets = userData?.tickets ?? 0;
-          await supabase.from('users').update({ tickets: currentTickets + 5 }).eq('line_user_id', userId);
-        }
-      }
-    } else if (event.type === 'customer.subscription.deleted') {
-      const subscription = event.data.object;
-      const customerId = subscription.customer;
-      await supabase.from('users').update({ is_premium: false }).eq('stripe_customer_id', customerId);
-    }
-  } catch(e: any) {
-    console.error('Failed to update DB on Stripe webhook', e);
-  }
-
-  return c.json({ received: true });
-});
 
 // --- Webhook ---
 
@@ -1670,6 +1702,19 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                // 最初のイベントの日付を代表日付とする
                const eventDate = allEvents.length > 0 ? allEvents[0].start.split('T')[0] : null
 
+               // --- Embedding生成 (新規追加) ---
+               let embeddingArray: number[] | null = null
+               if (rawText) {
+                 try {
+                   const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY)
+                   const embedModel = genAI.getGenerativeModel({ model: 'text-embedding-004' })
+                   const result = await embedModel.embedContent(rawText)
+                   embeddingArray = result.embedding.values
+                 } catch (embedErr) {
+                   console.error('Failed to generate embedding:', embedErr)
+                 }
+               }
+
                await supabase.from('school_prints').insert({
                  user_id: userId,
                  message_id: targetMsgId,
@@ -1677,7 +1722,8 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                  full_ocr_text: rawText,
                  title: parsedTitle,
                  canonical_tags: Array.from(allTags),
-                 event_date: eventDate
+                 event_date: eventDate,
+                 embedding: embeddingArray ? `[${embeddingArray.join(',')}]` : null
                })
              } catch (e: any) {
                console.error('Failed to save school_prints:', e)
@@ -1994,50 +2040,54 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
          })
        }
        
-       // 4. AIチャットアシスタント (プレミアム限定)
+       // 4. AIチャットアシスタント
        // グループでの誤爆を防ぐため、個人チャットのみ反応する
        if (event.source.type === 'user') {
          const userId = event.source.userId;
          if (userId) {
-           // レートリミットチェック (1日100回制限)
-           const allowed = await checkAndUpdateRateLimit(userId, supabase)
-           if (!allowed) {
-              await client.replyMessage({ 
-                  replyToken: event.replyToken, 
-                  messages: [{ type: 'text', text: '⚠️ 1日のAI利用上限（100回）に達しました。セキュリティ保護のため一時的に制限されています。明日またご利用ください。' }] 
-              })
-              continue
-           }
-
            const { data: userData } = await supabase.from('users').select('is_premium').eq('line_user_id', userId).single();
-           if (!userData?.is_premium) {
+           const isPremium = userData?.is_premium || false;
+
+           // レートリミットチェック (プレミアムは無制限、非プレミアムは1日3回)
+           const allowed = await checkAndUpdateChatRateLimit(userId, isPremium, supabase);
+           if (!allowed) {
              const premiumUrl = env.LINE_LIFF_ID_PREMIUM ? `https://liff.line.me/${env.LINE_LIFF_ID_PREMIUM}/premium` : `https://liff.line.me/${env.LINE_LIFF_ID}`;
-             await client.replyMessage({
-               replyToken: event.replyToken,
-               messages: [{ 
-                 type: 'text', 
-                 text: '🤖 おしゃべりAIアシスタント機能は【プレミアムプラン限定】です✨\n過去のプリントから「次のお弁当の日は？」「明日の持ち物は？」など何でもお答えします！\n\n詳細はこちら👇\n' + premiumUrl 
-               }]
+             const ctaBubble = createPremiumCtaBubble(premiumUrl);
+             await client.replyMessage({ 
+                 replyToken: event.replyToken, 
+                 messages: [{ type: 'flex', altText: '💎 プレミアムプランのご案内', contents: ctaBubble as any }] 
              });
              continue;
            }
 
-           // プレミアムユーザー: 過去90日間のプリントを取得してRAG
-           const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
-           const { data: pastPrints } = await supabase
-             .from('school_prints')
-             .select('title, event_date, full_ocr_text')
-             .eq('user_id', userId)
-             .gte('created_at', ninetyDaysAgo)
-             .order('event_date', { ascending: false });
+           const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
+           let contextText = '【関連する過去のプリント情報】\n';
 
-           let contextText = '【過去のプリント情報】\n';
-           if (!pastPrints || pastPrints.length === 0) {
-             contextText += '最近登録されたプリントはありません。\n';
-           } else {
-             pastPrints.forEach((p, idx) => {
-               contextText += `---\n[プリント${idx + 1}] タイトル: ${p.title}\n行事日: ${p.event_date}\n内容:\n${p.full_ocr_text}\n`;
+           // 類似プリントの検索 (RAG)
+           try {
+             const embedModel = genAI.getGenerativeModel({ model: 'text-embedding-004' });
+             const embedResult = await embedModel.embedContent(rawText);
+             const queryEmbedding = embedResult.embedding.values;
+
+             const { data: matchedPrints, error: rpcError } = await supabase.rpc('match_school_prints', {
+               query_embedding: `[${queryEmbedding.join(',')}]`,
+               match_threshold: 0.1, // 類似度閾値
+               match_count: 3,       // 上位3件
+               target_user_id: userId
              });
+
+             if (rpcError) throw rpcError;
+
+             if (!matchedPrints || matchedPrints.length === 0) {
+               contextText += '特に関連するプリントはありませんでした。\n';
+             } else {
+               matchedPrints.forEach((p: any, idx: number) => {
+                 contextText += `---\n[プリント${idx + 1}] タイトル: ${p.title}\n行事日: ${p.event_date}\n内容:\n${p.full_ocr_text}\n`;
+               });
+             }
+           } catch (ragErr) {
+             console.error('RAG Search Error:', ragErr);
+             contextText += '※プリントの検索に失敗しました。\n';
            }
 
            const todayStr = new Date().toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
@@ -2052,21 +2102,40 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
 ${contextText}`;
 
            try {
-             const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
+             // 履歴の取得
+             const { data: pastMessages } = await supabase
+               .from('chat_messages')
+               .select('role, content')
+               .eq('user_id', userId)
+               .order('created_at', { ascending: false })
+               .limit(6); // 直近3往復
+
+             const history = (pastMessages || []).reverse().map(msg => ({
+               role: msg.role,
+               parts: [{ text: msg.content }]
+             }));
+
              const model = genAI.getGenerativeModel({ 
                model: 'gemini-2.5-flash',
                systemInstruction: systemInstruction 
              });
              
-             const result = await model.generateContent(rawText);
+             const chat = model.startChat({ history });
+             const result = await chat.sendMessage(rawText);
              const answer = result.response.text();
+             
+             // 非同期で会話を保存
+             supabase.from('chat_messages').insert([
+               { user_id: userId, role: 'user', content: rawText },
+               { user_id: userId, role: 'model', content: answer }
+             ]).then();
              
              await client.replyMessage({
                replyToken: event.replyToken,
                messages: [{ type: 'text', text: answer }]
              });
            } catch (e: any) {
-             console.error('RAG Error:', e);
+             console.error('Chat Error:', e);
              await client.replyMessage({
                replyToken: event.replyToken,
                messages: [{ type: 'text', text: 'ごめんなさい💦 エラーが発生して回答できませんでした。' }]
@@ -2124,11 +2193,12 @@ async function handleScheduled(event: any, env: Bindings) {
     .select('line_user_id, reminder_days')
     .eq('is_premium', true)
 
-  if (!premiumUsers || premiumUsers.length === 0) return
+  const pUsers = premiumUsers || []
+  if (pUsers.length === 0) return
 
   // 2. reminder_days ごとにユーザーをグループ化 (デフォルトは3)
   const usersByDays: Record<number, string[]> = {}
-  premiumUsers.forEach(u => {
+  pUsers.forEach(u => {
     const days = u.reminder_days ?? 3
     if (!usersByDays[days]) usersByDays[days] = []
     usersByDays[days].push(u.line_user_id)
@@ -2154,10 +2224,11 @@ async function handleScheduled(event: any, env: Bindings) {
       .in('user_id', userIds)
       .like('start_time', `${targetDateStr}%`)
 
-    if (!upcomingEvents || upcomingEvents.length === 0) continue
+    const events = upcomingEvents || []
+    if (events.length === 0) continue
 
     const userEvents: Record<string, any[]> = {}
-    upcomingEvents.forEach(ev => {
+    events.forEach(ev => {
       if (!userEvents[ev.user_id]) userEvents[ev.user_id] = []
       userEvents[ev.user_id].push(ev)
     })
