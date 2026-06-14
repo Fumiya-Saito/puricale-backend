@@ -1393,7 +1393,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
              }
 
              // ユーザー情報・認証取得
-             const { data: userData } = await supabase.from('users').select('keywords, calendar_id, child_settings').eq('line_user_id', userId).single()
+             const { data: userData } = await supabase.from('users').select('keywords, calendar_id, child_settings, is_premium, monthly_event_count, monthly_reset_month').eq('line_user_id', userId).single()
              const { data: authData } = await supabase.from('google_auth').select('*').eq('user_id', userId).single()
              const userKeywords: string[] = userData?.keywords || []
              const sharedCalendarId = userData?.calendar_id || 'primary'
@@ -1491,8 +1491,6 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                const json = JSON.parse(jsonText)
                const parsed = ResponseSchema.parse(json)
                allEvents = parsed.events || []
-               rawText = parsed.raw_text || ''
-               parsedTitle = parsed.title || null
              } catch (e: any) {
                console.error('Parse Error:', e)
                try {
@@ -1605,7 +1603,24 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                keptEvents.push({ ...ev, targetCalendarId: targetCalId, matchedChildName })
              }
 
-             // Googleトークンリフレッシュ
+              // --- 月間登録上限チェック (無料プランのみ) ---
+              const isPremium = userData?.is_premium || false
+              let currentCount = userData?.monthly_event_count || 0
+
+              const limitResult = await checkMonthlyLimit(
+                userId,
+                keptEvents.length,
+                userData,
+                event.replyToken,
+                client,
+                supabase
+              )
+              if (!limitResult.allowed) {
+                continue
+              }
+              currentCount = limitResult.updatedCount
+
+              // Googleトークンリフレッシュ
              let accessToken = authData.access_token
              if (Date.now() > (authData.expiry_date || 0)) {
                 const newTokens = await (await fetchWithRetry('https://oauth2.googleapis.com/token', {
@@ -1669,6 +1684,13 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
                    start_time: ev.start
                  }))
                )
+
+               // 月間カウントを更新（無料プランのみ）
+               if (!isPremium) {
+                 await supabase.from('users').update({
+                   monthly_event_count: currentCount + registeredEvents.length
+                 }).eq('line_user_id', userId)
+               }
              }
       
              // DB保存: Rescue用
@@ -1823,7 +1845,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
       if (action === 'undo') {
         const { data: eventsToDelete } = await supabase
           .from('calendar_events')
-          .select('*')
+          .select('*, registered_at')
           .eq('source_message_id', targetMsgId)
           .eq('user_id', userId)
         
@@ -1831,6 +1853,12 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
           await client.replyMessage({ replyToken: event.replyToken, messages: [{ type: 'text', text: '削除できるデータが見つかりませんでした。' }] })
           continue
         }
+
+        // 30分以内かどうかを判定
+        const registeredAtStr = eventsToDelete[0].registered_at || eventsToDelete[0].created_at
+        const registeredAt = registeredAtStr ? new Date(registeredAtStr) : new Date()
+        const now = new Date()
+        const isWithin30Min = (now.getTime() - registeredAt.getTime()) < 30 * 60 * 1000
 
         const { data: authData } = await supabase.from('google_auth').select('*').eq('user_id', userId).single()
         let accessToken = authData?.access_token
@@ -1850,6 +1878,7 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
         const possibleCalendarIds = [calendarIdForUndo, ...(userDataForUndo?.child_settings || []).map((c: any) => c.calendar_id).filter(Boolean)]
 
         let deletedCount = 0
+        const successfullyDeletedGoogleIds: string[] = []
         for (const ev of eventsToDelete) {
           // すべての可能性のあるカレンダーから削除を試みる (DB側に登録カレンダーIDがないため)
           for (const cid of possibleCalendarIds) {
@@ -1859,13 +1888,55 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
             })
             if (res.ok) { 
               deletedCount++
+              successfullyDeletedGoogleIds.push(ev.google_event_id)
               break 
             }
           }
         }
 
-        await supabase.from('calendar_events').delete().eq('source_message_id', targetMsgId)
-        await client.replyMessage({ replyToken: event.replyToken, messages: [{ type: 'text', text: `🗑️ ${deletedCount}件を取り消しました。` }] })
+        if (successfullyDeletedGoogleIds.length > 0) {
+          await supabase
+            .from('calendar_events')
+            .delete()
+            .in('google_event_id', successfullyDeletedGoogleIds)
+            .eq('source_message_id', targetMsgId)
+            .eq('user_id', userId)
+        }
+
+        // 30分以内なら残枠を返却
+        const { data: undoUserData } = await supabase
+          .from('users')
+          .select('is_premium, monthly_event_count')
+          .eq('line_user_id', userId)
+          .single()
+
+        if (!undoUserData?.is_premium && isWithin30Min) {
+          const restoredCount = Math.max(0, (undoUserData?.monthly_event_count || 0) - deletedCount)
+          await supabase.from('users').update({
+            monthly_event_count: restoredCount
+          }).eq('line_user_id', userId)
+
+          await client.replyMessage({
+            replyToken: event.replyToken,
+            messages: [{
+              type: 'text',
+              text: `🗑️ ${deletedCount}件の予定を取り消しました
+登録枠に${deletedCount}件を返却しました📋`
+            }]
+          })
+        } else {
+          let text = `🗑️ ${deletedCount}件を取り消しました。`
+          if (!undoUserData?.is_premium && !isWithin30Min) {
+            text = `🗑️ ${deletedCount}件の予定を取り消しました
+
+※ 登録から30分以上経過しているため
+　登録枠は戻りません`
+          }
+          await client.replyMessage({
+            replyToken: event.replyToken,
+            messages: [{ type: 'text', text }]
+          })
+        }
       }
 
       // Rescue機能 (救出)
@@ -1892,8 +1963,28 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
            await supabase.from('google_auth').update({ access_token: accessToken, expiry_date: Date.now() + 3500 * 1000 }).eq('user_id', userId)
         }
 
-        const { data: userDataForRescue } = await supabase.from('users').select('calendar_id').eq('line_user_id', userId).single()
+        const { data: userDataForRescue } = await supabase
+          .from('users')
+          .select('calendar_id, is_premium, monthly_event_count, monthly_reset_month')
+          .eq('line_user_id', userId)
+          .single()
+
         const targetCalendarId = userDataForRescue?.calendar_id || 'primary'
+        const isPremium = userDataForRescue?.is_premium || false
+        let currentCount = userDataForRescue?.monthly_event_count || 0
+
+        const limitResult = await checkMonthlyLimit(
+          userId,
+          ignoredEvents.length,
+          userDataForRescue,
+          event.replyToken,
+          client,
+          supabase
+        )
+        if (!limitResult.allowed) {
+          continue
+        }
+        currentCount = limitResult.updatedCount
 
         const rescuePromises = ignoredEvents.map(async (ev) => {
           const res = await fetchWithRetry(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(targetCalendarId)}/events`, {
@@ -1926,6 +2017,13 @@ async function handleEvents(events: WebhookEvent[], env: Bindings, reqUrl: strin
             }))
           )
           await supabase.from('parsing_logs').delete().eq('message_id', targetMsgId)
+
+          // 月間カウントを更新（無料プランのみ）
+          if (!isPremium) {
+            await supabase.from('users').update({
+              monthly_event_count: currentCount + rescued.length
+            }).eq('line_user_id', userId)
+          }
         }
 
         const liffUrl = `https://liff.line.me/2009105255-Zi7rWEZi?liff.state=/mypage`
@@ -2258,6 +2356,66 @@ async function handleScheduled(event: any, env: Bindings) {
       }
     }
   }
+}
+
+// --- Monthly Limit Helper ---
+async function checkMonthlyLimit(
+  userId: string,
+  eventCount: number,
+  userData: { is_premium: boolean; monthly_event_count: number; monthly_reset_month: string } | null,
+  replyToken: string,
+  client: messagingApi.MessagingApiClient,
+  supabase: any
+): Promise<{ allowed: boolean; updatedCount: number }> {
+  const isPremium = userData?.is_premium || false
+  let currentCount = userData?.monthly_event_count || 0
+  let currentMonth = userData?.monthly_reset_month || ''
+
+  if (isPremium || eventCount === 0) {
+    return { allowed: true, updatedCount: currentCount }
+  }
+
+  const MONTHLY_LIMIT = 20
+  const formatter = new Intl.DateTimeFormat('ja-JP', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit'
+  })
+  const parts = formatter.formatToParts(new Date())
+  const year = parts.find(p => p.type === 'year')?.value
+  const month = parts.find(p => p.type === 'month')?.value
+  const currentMonthTokyo = `${year}-${month}`
+
+  // 月が変わっていたらリセット
+  if (currentMonth !== currentMonthTokyo) {
+    currentCount = 0
+    currentMonth = currentMonthTokyo
+    await supabase.from('users').update({
+      monthly_event_count: 0,
+      monthly_reset_month: currentMonthTokyo
+    }).eq('line_user_id', userId)
+  }
+
+  const remaining = MONTHLY_LIMIT - currentCount
+  if (eventCount > remaining) {
+    const nextReset = new Date()
+    nextReset.setMonth(nextReset.getMonth() + 1)
+    nextReset.setDate(1)
+    const resetStr = nextReset.toLocaleDateString('ja-JP', {
+      timeZone: 'Asia/Tokyo', month: 'long', day: 'numeric'
+    })
+
+    await client.replyMessage({
+      replyToken: replyToken,
+      messages: [{
+        type: 'text',
+        text: `📊 今月の登録枠が足りません🙏\n\n残り: ${remaining}件 ／ 上限: ${MONTHLY_LIMIT}件\nこのプリントの予定: ${eventCount}件\n\n✨ プレミアムなら月間無制限で登録できます\nhttps://puricale.jp/premium\n\n💡 ${resetStr}になると\n　登録枠がリセットされます`
+      }]
+    })
+    return { allowed: false, updatedCount: currentCount }
+  }
+
+  return { allowed: true, updatedCount: currentCount }
 }
 
 // --- Cron Endpoint ---
