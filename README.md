@@ -152,8 +152,11 @@ Google Cloud Scheduler Cron (毎日 12:00 JST) -> /api/cron
 | `npm run dev` | ローカル開発サーバー起動 (`tsx watch`) |
 | `gcloud run deploy` | Google Cloud Runへ手動デプロイ |
 
-> **デプロイについて**: `main` ブランチへのマージで Cloud Build が自動デプロイを実行します。  
-> 反映されない場合は [Cloud Build > 履歴](https://console.cloud.google.com/cloud-build/builds) でビルドの成否を確認してください。
+> ⚠️ **重要（開発運用ルール）**:
+> * `main`（またはフロントエンドの `master`）ブランチへのマージまたはプッシュにより、Cloud Build 経由で本番環境への自動デプロイが実行されます。
+> * そのため、**開発時は直接 `main` (`master`) ブランチへ `push` してはなりません。**
+> * 必ず `develop` ブランチ等の開発用ブランチへプッシュし、プルリクエストを経由して本番ブランチへマージするようにしてください。
+> * 反映されない場合は [Cloud Build > 履歴](https://console.cloud.google.com/cloud-build/builds) でビルドの成否を確認してください。
 
 ## 📐 設計メモ
 
